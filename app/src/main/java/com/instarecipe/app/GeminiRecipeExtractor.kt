@@ -3,6 +3,7 @@ package com.instarecipe.app
 import android.content.Context
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -26,6 +27,7 @@ data class ExtractedRecipeData(
 )
 
 object GeminiRecipeExtractor {
+    private data class UploadedFile(val name: String, val uri: String)
     // Primary default model
     const val MODEL_GEMINI_2_5_FLASH = "gemini-2.5-flash"
     const val MODEL_GEMINI_2_0_FLASH = "gemini-2.0-flash"
@@ -35,9 +37,6 @@ object GeminiRecipeExtractor {
 
     val AVAILABLE_MODELS = listOf(
         MODEL_GEMINI_2_5_FLASH,
-        MODEL_GEMINI_2_0_FLASH,
-        MODEL_GEMINI_1_5_FLASH,
-        MODEL_GEMINI_3_1_FLASH_LITE,
         MODEL_GEMINI_3_8_FLASH
     )
 
@@ -54,15 +53,21 @@ object GeminiRecipeExtractor {
         .build()
 
     fun getApiKey(context: Context): String {
+        val secureValue = SecurePreferences.getGeminiApiKey(context)
+        if (secureValue.isNotBlank()) return secureValue
+
+        // One-time migration from releases that stored the key as plaintext.
         val prefs = context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_API_KEY, null)?.trim().orEmpty()
+        val legacyValue = prefs.getString(KEY_API_KEY, null)?.trim().orEmpty()
+        if (legacyValue.isNotBlank()) {
+            SecurePreferences.setGeminiApiKey(context, legacyValue)
+            prefs.edit().remove(KEY_API_KEY).apply()
+        }
+        return legacyValue
     }
 
     fun setApiKey(context: Context, key: String) {
-        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_API_KEY, key.trim())
-            .apply()
+        SecurePreferences.setGeminiApiKey(context, key)
     }
 
     fun getSelectedModel(context: Context): String {
@@ -139,12 +144,14 @@ object GeminiRecipeExtractor {
 
         val prompt = buildPrompt(sourceUrl, creatorName, textCaption, hasVideo, hasCaption)
         val partsArray = JSONArray()
+        var uploadedFileName: String? = null
 
         if (hasVideo) {
-            val fileSizeMb = videoFile!!.length() / (1024.0 * 1024.0)
+            val recipeVideo = requireNotNull(videoFile)
+            val fileSizeMb = recipeVideo.length() / (1024.0 * 1024.0)
             if (fileSizeMb <= 16.0) {
                 onStatus("Uploading video directly to Gemini AI (${"%.1f".format(fileSizeMb)} MB)...")
-                val bytes = videoFile.readBytes()
+                val bytes = recipeVideo.readBytes()
                 val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
 
                 val inlineData = JSONObject().apply {
@@ -154,10 +161,11 @@ object GeminiRecipeExtractor {
                 partsArray.put(JSONObject().put("inlineData", inlineData))
             } else {
                 onStatus("Uploading video (${"%.1f".format(fileSizeMb)} MB) via Gemini File API...")
-                val fileUri = uploadLargeVideo(apiKey, videoFile)
+                val uploadedFile = uploadLargeVideo(apiKey, recipeVideo)
+                uploadedFileName = uploadedFile.name
                 val fileData = JSONObject().apply {
                     put("mimeType", "video/mp4")
-                    put("fileUri", fileUri)
+                    put("fileUri", uploadedFile.uri)
                 }
                 partsArray.put(JSONObject().put("fileData", fileData))
             }
@@ -170,7 +178,10 @@ object GeminiRecipeExtractor {
         partsArray.put(JSONObject().put("text", prompt))
 
         val preferredModel = getSelectedModel(context)
-        val modelsToTry = linkedSetOf(preferredModel).apply { addAll(AVAILABLE_MODELS) }.toList()
+        val modelsToTry = listOfNotNull(
+            preferredModel,
+            MODEL_GEMINI_2_5_FLASH.takeUnless { it == preferredModel }
+        )
 
         var responseText: String? = null
         var lastErrorMessage = ""
@@ -186,7 +197,8 @@ object GeminiRecipeExtractor {
             }
 
             val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey")
+                .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+                .addHeader("x-goog-api-key", apiKey)
                 .addHeader("Content-Type", "application/json")
                 .post(contentPayload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
@@ -209,6 +221,8 @@ object GeminiRecipeExtractor {
             if (!responseText.isNullOrBlank()) break
         }
 
+        uploadedFileName?.let { deleteUploadedFile(apiKey, it) }
+
         if (responseText.isNullOrBlank()) {
             throw RuntimeException("Gemini API Error: $lastErrorMessage")
         }
@@ -219,14 +233,15 @@ object GeminiRecipeExtractor {
     /**
      * Uploads video file > 16MB via Gemini File API and returns the fileUri.
      */
-    private fun uploadLargeVideo(apiKey: String, videoFile: File): String {
-        val startUrl = "https://generativelanguage.googleapis.com/upload/v1beta/files?key=$apiKey"
+    private suspend fun uploadLargeVideo(apiKey: String, videoFile: File): UploadedFile {
+        val startUrl = "https://generativelanguage.googleapis.com/upload/v1beta/files"
         val metadata = JSONObject().apply {
             put("file", JSONObject().put("displayName", videoFile.name))
         }
 
         val startRequest = Request.Builder()
             .url(startUrl)
+            .addHeader("x-goog-api-key", apiKey)
             .addHeader("X-Goog-Upload-Protocol", "resumable")
             .addHeader("X-Goog-Upload-Command", "start")
             .addHeader("X-Goog-Upload-Header-Content-Length", videoFile.length().toString())
@@ -250,13 +265,45 @@ object GeminiRecipeExtractor {
             .post(videoFile.asRequestBody("video/mp4".toMediaType()))
             .build()
 
-        return client.newCall(uploadRequest).execute().use { res ->
+        val uploaded = client.newCall(uploadRequest).execute().use { res ->
             val body = res.body?.string().orEmpty()
             if (!res.isSuccessful) {
                 throw RuntimeException("Failed to upload video content: $body")
             }
             val json = JSONObject(body)
-            json.getJSONObject("file").getString("uri")
+            val file = json.getJSONObject("file")
+            UploadedFile(file.getString("name"), file.getString("uri"))
+        }
+        return waitUntilFileIsActive(apiKey, uploaded)
+    }
+
+    private suspend fun waitUntilFileIsActive(apiKey: String, uploaded: UploadedFile): UploadedFile {
+        repeat(90) {
+            val request = Request.Builder()
+                .url("https://generativelanguage.googleapis.com/v1beta/${uploaded.name}")
+                .addHeader("x-goog-api-key", apiKey)
+                .build()
+            val state = client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw RuntimeException("Could not check uploaded video status.")
+                JSONObject(response.body?.string().orEmpty()).optString("state")
+            }
+            when (state) {
+                "ACTIVE" -> return uploaded
+                "FAILED" -> throw RuntimeException("Gemini could not process this video.")
+            }
+            delay(1_000)
+        }
+        throw RuntimeException("Video processing timed out. Please try a shorter video.")
+    }
+
+    private fun deleteUploadedFile(apiKey: String, name: String) {
+        runCatching {
+            val request = Request.Builder()
+                .url("https://generativelanguage.googleapis.com/v1beta/$name")
+                .addHeader("x-goog-api-key", apiKey)
+                .delete()
+                .build()
+            client.newCall(request).execute().close()
         }
     }
 
@@ -380,7 +427,7 @@ object GeminiRecipeExtractor {
             title = title,
             creator = creator,
             category = category,
-            tags = tagsList,
+            tags = TagNormalizer.normalizeAll(tagsList),
             ingredients = ingredientsList,
             steps = stepsList,
             notes = combinedNotes,
@@ -397,7 +444,8 @@ object GeminiRecipeExtractor {
                 put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", "Respond with 'OK'")))))
             }
             val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey")
+                .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+                .addHeader("x-goog-api-key", apiKey)
                 .addHeader("Content-Type", "application/json")
                 .post(legacyPayload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()

@@ -7,6 +7,19 @@
 
 ## Release & Version History
 
+### Unreleased: Reliability, Local Data, Tags & Recipe Cards
+
+- Migrated recipes to Room with a one-time, failure-safe import of the previous on-device recipe data.
+- Added lifecycle-aware database state, recipe deletion confirmation, and system-back handling for detail, editor, and cooking views.
+- Encrypted the Gemini API key with Android Keystore, moved API authentication to request headers, and added large-video processing checks and cleanup.
+- Retained optional in-app Instagram sign-in while restricting the WebView to secure Instagram navigation and keeping cookies in the WebView store.
+- Added normalized editable tags, tag-aware search and cookbook filtering, and dynamic tag filter chips.
+- Reworked recipe tiles as elevated flip cards: card tap reveals main ingredients while dedicated View and Cook actions enter the recipe flows.
+- Updated the Android/API 36 build stack and added unit coverage for tag normalization and Instagram URL canonicalization.
+- Verification: unit tests, `:app:assembleDebug`, and `:app:lintDebug` pass; lint reports 0 errors.
+
+---
+
 ### [v0.3.1] - 2026-09-10: Production UI Polish, Accessible Themes & Typography
 **A full visual-system pass that makes the culinary identity consistent in light and dark environments.**
 

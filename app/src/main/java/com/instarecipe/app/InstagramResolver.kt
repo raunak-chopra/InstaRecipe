@@ -364,6 +364,7 @@ object InstagramResolver {
     }
 
     private fun queryCobaltResolver(endpoint: String, targetUrl: String): String? {
+        if (!endpoint.startsWith("https://", ignoreCase = true)) return null
         val jsonPayload = JSONObject().apply {
             put("url", targetUrl)
             put("videoQuality", "720")

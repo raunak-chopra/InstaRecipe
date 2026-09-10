@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -37,6 +39,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Home
@@ -55,11 +58,14 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import android.graphics.Bitmap
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -77,6 +83,7 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -107,6 +114,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
@@ -140,8 +148,6 @@ import com.instarecipe.app.ui.theme.WarmSaffronContainer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.time.LocalDate
@@ -178,6 +184,7 @@ private object ThemePreferences {
 
 class MainActivity : ComponentActivity() {
     private var sharePayloadState = mutableStateOf<SharePayload?>(null)
+    private val appViewModel by viewModels<InstaRecipeViewModel>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -185,6 +192,7 @@ class MainActivity : ComponentActivity() {
         sharePayloadState.value = intent.extractSharePayload()
         setContent {
             InstaRecipeApp(
+                viewModel = appViewModel,
                 initialSharePayload = sharePayloadState.value,
                 onShareHandled = { sharePayloadState.value = null }
             )
@@ -256,26 +264,28 @@ data class Recipe(
 
 @Composable
 private fun InstaRecipeApp(
+    viewModel: InstaRecipeViewModel,
     initialSharePayload: SharePayload?,
     onShareHandled: () -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var themeMode by remember { mutableStateOf(ThemePreferences.load(context)) }
-    val recipes = remember {
-        mutableStateListOf<Recipe>().apply {
-            addAll(RecipeStore.load(context).ifEmpty { demoRecipes() })
-        }
-    }
+    val recipes by viewModel.recipes.collectAsStateWithLifecycle()
     var selectedTab by rememberSaveable { mutableStateOf(Tab.Library) }
+    var libraryFilterId by rememberSaveable { mutableStateOf("all") }
     var editingRecipe by remember { mutableStateOf<Recipe?>(null) }
     var viewingRecipe by remember { mutableStateOf<Recipe?>(null) }
     var cookingRecipe by remember { mutableStateOf<Recipe?>(null) }
 
     var extractionProgress by remember { mutableStateOf(ExtractionProgress()) }
 
-    LaunchedEffect(recipes.toList()) {
-        RecipeStore.save(context, recipes)
+    BackHandler(enabled = cookingRecipe != null || editingRecipe != null || viewingRecipe != null) {
+        when {
+            cookingRecipe != null -> cookingRecipe = null
+            editingRecipe != null -> editingRecipe = null
+            viewingRecipe != null -> viewingRecipe = null
+        }
     }
 
     // Clean any lingering temporary video files on startup to keep storage minimal
@@ -331,7 +341,7 @@ private fun InstaRecipeApp(
                         status = RecipeStatus.Draft,
                         savedDate = LocalDate.now().toString()
                     )
-                    recipes.add(0, newRecipe)
+                    viewModel.upsert(newRecipe)
                     editingRecipe = newRecipe
                     extractionProgress = ExtractionProgress(isExtracting = false)
                 } catch (e: Exception) {
@@ -383,7 +393,7 @@ private fun InstaRecipeApp(
                         status = RecipeStatus.Draft,
                         savedDate = LocalDate.now().toString()
                     )
-                    recipes.add(0, draft)
+                    viewModel.upsert(draft)
                     extractionProgress = ExtractionProgress(
                         isExtracting = false,
                         error = "Gemini API key is required for AI video extraction. You can set it up in Settings."
@@ -433,7 +443,7 @@ private fun InstaRecipeApp(
                                 status = RecipeStatus.Draft,
                                 savedDate = LocalDate.now().toString()
                             )
-                            recipes.add(0, draft)
+                            viewModel.upsert(draft)
                             editingRecipe = draft
                             extractionProgress = ExtractionProgress(
                                 isExtracting = false,
@@ -468,7 +478,7 @@ private fun InstaRecipeApp(
                             status = RecipeStatus.Draft,
                             savedDate = LocalDate.now().toString()
                         )
-                        recipes.add(0, newRecipe)
+                        viewModel.upsert(newRecipe)
                         editingRecipe = newRecipe
                         extractionProgress = ExtractionProgress(isExtracting = false)
                     } catch (e: Exception) {
@@ -488,7 +498,7 @@ private fun InstaRecipeApp(
                             status = RecipeStatus.Draft,
                             savedDate = LocalDate.now().toString()
                         )
-                        recipes.add(0, fallback)
+                        viewModel.upsert(fallback)
                         editingRecipe = fallback
                         extractionProgress = ExtractionProgress(
                             isExtracting = false,
@@ -549,7 +559,7 @@ private fun InstaRecipeApp(
                             status = RecipeStatus.Draft,
                             savedDate = LocalDate.now().toString()
                         )
-                        recipes.add(0, newRecipe)
+                        viewModel.upsert(newRecipe)
                         editingRecipe = newRecipe
                         extractionProgress = ExtractionProgress(isExtracting = false)
                     } catch (e: Exception) {
@@ -573,8 +583,7 @@ private fun InstaRecipeApp(
                     recipe = editingRecipe,
                     onCancel = { editingRecipe = null },
                     onSave = { saved ->
-                        val index = recipes.indexOfFirst { it.id == saved.id }
-                        if (index >= 0) recipes[index] = saved else recipes.add(0, saved)
+                        viewModel.upsert(saved)
                         editingRecipe = null
                         viewingRecipe = saved
                     },
@@ -625,15 +634,26 @@ private fun InstaRecipeApp(
                     recipe = viewingRecipe!!,
                     onBack = { viewingRecipe = null },
                     onEdit = { editingRecipe = viewingRecipe },
+                    onDelete = {
+                        viewModel.delete(viewingRecipe!!.id)
+                        viewingRecipe = null
+                    },
                     onToggleFavorite = {
-                        recipes.updateRecipe(viewingRecipe!!.id) { copy(favorite = !favorite) }
-                        viewingRecipe = recipes.first { it.id == viewingRecipe!!.id }
+                        val updated = viewingRecipe!!.copy(favorite = !viewingRecipe!!.favorite)
+                        viewModel.upsert(updated)
+                        viewingRecipe = updated
                     },
                     onToggleCooked = {
-                        recipes.updateRecipe(viewingRecipe!!.id) { copy(cooked = !cooked) }
-                        viewingRecipe = recipes.first { it.id == viewingRecipe!!.id }
+                        val updated = viewingRecipe!!.copy(cooked = !viewingRecipe!!.cooked)
+                        viewModel.upsert(updated)
+                        viewingRecipe = updated
                     },
-                    onStartCooking = { cookingRecipe = viewingRecipe }
+                    onStartCooking = { cookingRecipe = viewingRecipe },
+                    onTagSelected = { tag ->
+                        libraryFilterId = "tag:${TagNormalizer.key(tag)}"
+                        viewingRecipe = null
+                        selectedTab = Tab.Library
+                    }
                 )
 
                 else -> MainScaffold(
@@ -642,12 +662,18 @@ private fun InstaRecipeApp(
                     extractionProgress = extractionProgress,
                     onDismissError = { extractionProgress = extractionProgress.copy(error = null) },
                     onTabSelected = { selectedTab = it },
+                    libraryFilterId = libraryFilterId,
+                    onLibraryFilterSelected = { libraryFilterId = it },
+                    onTagSelected = { tag ->
+                        libraryFilterId = "tag:${TagNormalizer.key(tag)}"
+                        selectedTab = Tab.Library
+                    },
                     onOpen = { viewingRecipe = it },
                     onToggleFavorite = { recipe ->
-                        recipes.updateRecipe(recipe.id) { copy(favorite = !favorite) }
+                        viewModel.update(recipe.id) { copy(favorite = !favorite) }
                     },
                     onToggleCooked = { recipe ->
-                        recipes.updateRecipe(recipe.id) { copy(cooked = !cooked) }
+                        viewModel.update(recipe.id) { copy(cooked = !cooked) }
                     },
                     onStartCooking = { recipe -> cookingRecipe = recipe },
                     onAdd = {
@@ -684,7 +710,7 @@ private fun InstaRecipeApp(
                     ingredients = cookingRecipe!!.ingredients,
                     onClose = { cookingRecipe = null },
                     onFinishAndMarkCooked = {
-                        recipes.updateRecipe(cookingRecipe!!.id) { copy(cooked = true) }
+                        viewModel.update(cookingRecipe!!.id) { copy(cooked = true) }
                         if (viewingRecipe?.id == cookingRecipe?.id) {
                             viewingRecipe = viewingRecipe?.copy(cooked = true)
                         }
@@ -703,6 +729,9 @@ private fun MainScaffold(
     extractionProgress: ExtractionProgress,
     onDismissError: () -> Unit,
     onTabSelected: (Tab) -> Unit,
+    libraryFilterId: String,
+    onLibraryFilterSelected: (String) -> Unit,
+    onTagSelected: (String) -> Unit,
     onOpen: (Recipe) -> Unit,
     onToggleFavorite: (Recipe) -> Unit,
     onToggleCooked: (Recipe) -> Unit,
@@ -854,10 +883,13 @@ private fun MainScaffold(
             when (selectedTab) {
                 Tab.Library -> LibraryTabScreen(
                     recipes = recipes.filter { it.status == RecipeStatus.Saved },
+                    selectedFilterId = libraryFilterId,
+                    onFilterSelected = onLibraryFilterSelected,
                     onOpen = onOpen,
                     onToggleFavorite = onToggleFavorite,
                     onToggleCooked = onToggleCooked,
-                    onStartCooking = onStartCooking
+                    onStartCooking = onStartCooking,
+                    onTagSelected = onTagSelected
                 )
 
                 Tab.Inbox -> InboxTabScreen(
@@ -866,7 +898,8 @@ private fun MainScaffold(
                     onToggleFavorite = onToggleFavorite,
                     onToggleCooked = onToggleCooked,
                     onStartCooking = onStartCooking,
-                    onImportVideo = onImportVideo
+                    onImportVideo = onImportVideo,
+                    onTagSelected = onTagSelected
                 )
 
                 Tab.Search -> SearchTabScreen(
@@ -874,7 +907,8 @@ private fun MainScaffold(
                     onOpen = onOpen,
                     onToggleFavorite = onToggleFavorite,
                     onToggleCooked = onToggleCooked,
-                    onStartCooking = onStartCooking
+                    onStartCooking = onStartCooking,
+                    onTagSelected = onTagSelected
                 )
 
                 Tab.Settings -> SettingsScreen(
@@ -889,15 +923,16 @@ private fun MainScaffold(
 @Composable
 private fun LibraryTabScreen(
     recipes: List<Recipe>,
+    selectedFilterId: String,
+    onFilterSelected: (String) -> Unit,
     onOpen: (Recipe) -> Unit,
     onToggleFavorite: (Recipe) -> Unit,
     onToggleCooked: (Recipe) -> Unit,
-    onStartCooking: (Recipe) -> Unit
+    onStartCooking: (Recipe) -> Unit,
+    onTagSelected: (String) -> Unit
 ) {
-    var selectedFilterId by rememberSaveable { mutableStateOf("all") }
-
     val filters = remember(recipes) {
-        listOf(
+        val builtIns = listOf(
             CategoryFilter("all", "All"),
             CategoryFilter("favorites", "Favorites", FilterIconType.Favorite),
             CategoryFilter("quick", "Quick (<20m)", FilterIconType.Timer),
@@ -905,25 +940,32 @@ private fun LibraryTabScreen(
             CategoryFilter("veg", "Vegetarian"),
             CategoryFilter("cooked", "Cooked", FilterIconType.Check)
         )
+        val builtInKeys = setOf("quick", "high protein", "vegetarian")
+        val tagFilters = TagNormalizer.normalizeAll(recipes.flatMap { it.tags })
+            .filterNot { TagNormalizer.key(it) in builtInKeys }
+            .sortedBy { it.lowercase() }
+            .map { CategoryFilter("tag:${TagNormalizer.key(it)}", it) }
+        builtIns + tagFilters
     }
 
     val filteredRecipes = remember(selectedFilterId, recipes) {
         when (selectedFilterId) {
             "all" -> recipes
             "favorites" -> recipes.filter { it.favorite }
-            "quick" -> recipes.filter { recipe ->
-                recipe.notes.contains("min", ignoreCase = true) ||
-                    recipe.tags.any { it.contains("quick", ignoreCase = true) }
-            }
+            "quick" -> recipes.filter(::isQuickRecipe)
             "protein" -> recipes.filter { recipe ->
-                recipe.tags.any { it.contains("protein", ignoreCase = true) } ||
-                    recipe.title.contains("protein", ignoreCase = true)
+                TagNormalizer.matches(recipe.tags, "High Protein")
             }
             "veg" -> recipes.filter { recipe ->
-                recipe.tags.any { it.contains("veg", ignoreCase = true) }
+                TagNormalizer.matches(recipe.tags, "Vegetarian")
             }
             "cooked" -> recipes.filter { it.cooked }
-            else -> recipes.filter { it.category.equals(selectedFilterId, ignoreCase = true) }
+            else -> if (selectedFilterId.startsWith("tag:")) {
+                val tagKey = selectedFilterId.removePrefix("tag:")
+                recipes.filter { recipe -> recipe.tags.any { TagNormalizer.key(it) == tagKey } }
+            } else {
+                recipes.filter { it.category.equals(selectedFilterId, ignoreCase = true) }
+            }
         }
     }
 
@@ -952,7 +994,7 @@ private fun LibraryTabScreen(
             CategoryFilterRow(
                 filters = filters,
                 selectedFilterId = selectedFilterId,
-                onFilterSelected = { selectedFilterId = it }
+                onFilterSelected = onFilterSelected
             )
         }
 
@@ -975,12 +1017,21 @@ private fun LibraryTabScreen(
                         onOpen = { onOpen(recipe) },
                         onToggleFavorite = { onToggleFavorite(recipe) },
                         onToggleCooked = { onToggleCooked(recipe) },
-                        onStartCooking = { onStartCooking(recipe) }
+                        onStartCooking = { onStartCooking(recipe) },
+                        onTagClick = onTagSelected
                     )
                 }
             }
         }
     }
+}
+private fun isQuickRecipe(recipe: Recipe): Boolean {
+    if (TagNormalizer.matches(recipe.tags, "Quick")) return true
+    val minuteValues = Regex("""(?i)(?:prep|cook|total)?\s*time:?\s*(\d+)\s*(?:mins?|minutes?)""")
+        .findAll(recipe.notes)
+        .mapNotNull { it.groupValues.getOrNull(1)?.toIntOrNull() }
+        .toList()
+    return minuteValues.isNotEmpty() && minuteValues.sum() <= 20
 }
 
 @Composable
@@ -990,7 +1041,8 @@ private fun InboxTabScreen(
     onToggleFavorite: (Recipe) -> Unit,
     onToggleCooked: (Recipe) -> Unit,
     onStartCooking: (Recipe) -> Unit,
-    onImportVideo: () -> Unit
+    onImportVideo: () -> Unit,
+    onTagSelected: (String) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1058,7 +1110,8 @@ private fun InboxTabScreen(
                     onOpen = { onOpen(draft) },
                     onToggleFavorite = { onToggleFavorite(draft) },
                     onToggleCooked = { onToggleCooked(draft) },
-                    onStartCooking = { onStartCooking(draft) }
+                    onStartCooking = { onStartCooking(draft) },
+                    onTagClick = onTagSelected
                 )
             }
         }
@@ -1071,7 +1124,8 @@ private fun SearchTabScreen(
     onOpen: (Recipe) -> Unit,
     onToggleFavorite: (Recipe) -> Unit,
     onToggleCooked: (Recipe) -> Unit,
-    onStartCooking: (Recipe) -> Unit
+    onStartCooking: (Recipe) -> Unit,
+    onTagSelected: (String) -> Unit
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     val filtered = remember(query, recipes) {
@@ -1129,7 +1183,8 @@ private fun SearchTabScreen(
                     onOpen = { onOpen(recipe) },
                     onToggleFavorite = { onToggleFavorite(recipe) },
                     onToggleCooked = { onToggleCooked(recipe) },
-                    onStartCooking = { onStartCooking(recipe) }
+                    onStartCooking = { onStartCooking(recipe) },
+                    onTagClick = onTagSelected
                 )
             }
         }
@@ -1176,13 +1231,29 @@ private fun InstagramLoginDialog(
                             settings.apply {
                                 javaScriptEnabled = true
                                 domStorageEnabled = true
-                                userAgentString = "Mozilla/5.0 (Linux; Android 11; SAMSUNG SM-G973U) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/14.2 Chrome/87.0.4280.141 Mobile Safari/537.36"
+                                allowFileAccess = false
+                                allowContentAccess = false
+                                mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                                safeBrowsingEnabled = true
                             }
                             val cookieManager = CookieManager.getInstance()
                             cookieManager.setAcceptCookie(true)
                             cookieManager.setAcceptThirdPartyCookies(this, true)
 
                             webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                    val uri = request?.url ?: return true
+                                    val host = uri.host.orEmpty().lowercase()
+                                    val isTrustedInstagramUrl = uri.scheme == "https" &&
+                                        (host == "instagram.com" || host.endsWith(".instagram.com"))
+                                    if (isTrustedInstagramUrl) return false
+
+                                    runCatching {
+                                        ctx.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                                    }
+                                    return true
+                                }
+
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                     super.onPageStarted(view, url, favicon)
                                     isLoading = true
@@ -1317,7 +1388,6 @@ private fun SettingsScreen(
                         value = apiKey,
                         onValueChange = {
                             apiKey = it
-                            GeminiRecipeExtractor.setApiKey(context, it)
                         },
                         label = { Text("Gemini API Key") },
                         placeholder = { Text("AIzaSy...") },
@@ -1373,12 +1443,23 @@ private fun SettingsScreen(
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(
+                            onClick = {
+                                GeminiRecipeExtractor.setApiKey(context, apiKey)
+                                testStatus = "API key saved securely on this device."
+                            },
+                            enabled = apiKey.isNotBlank() && !isTesting,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Save Key")
+                        }
                         Button(
                             onClick = {
                                 isTesting = true
                                 testStatus = null
                                 coroutineScope.launch {
                                     val res = GeminiRecipeExtractor.testConnection(apiKey, selectedModel)
+                                    if (res.isSuccess) GeminiRecipeExtractor.setApiKey(context, apiKey)
                                     isTesting = false
                                     testStatus = res.getOrElse { it.message ?: "Failed" }
                                 }
@@ -1400,7 +1481,9 @@ private fun SettingsScreen(
                     }
 
                     if (testStatus != null) {
-                        val isSuccess = testStatus?.contains("successfully", ignoreCase = true) == true
+                        val isSuccess = testStatus?.let {
+                            it.contains("successfully", ignoreCase = true) || it.contains("saved securely", ignoreCase = true)
+                        } == true
                         Card(
                             colors = CardDefaults.cardColors(
                                 containerColor = if (isSuccess) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer
@@ -1623,11 +1706,14 @@ private fun RecipeDetail(
     recipe: Recipe,
     onBack: () -> Unit,
     onEdit: () -> Unit,
+    onDelete: () -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleCooked: () -> Unit,
-    onStartCooking: () -> Unit
+    onStartCooking: () -> Unit,
+    onTagSelected: (String) -> Unit
 ) {
     val context = LocalContext.current
+    var showDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
     var servingScale by rememberSaveable { mutableFloatStateOf(1.0f) }
     val checkedIngredients = remember { mutableStateListOf<String>() }
 
@@ -1636,7 +1722,12 @@ private fun RecipeDetail(
             CenterAlignedTopAppBar(
                 title = { Text(recipe.title.ifBlank { "Recipe" }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold) },
                 navigationIcon = { TextButton(onClick = onBack) { Text("Back", color = MaterialTheme.colorScheme.primary) } },
-                actions = { TextButton(onClick = onEdit) { Text("Edit", color = MaterialTheme.colorScheme.primary) } },
+                actions = {
+                    IconButton(onClick = { showDeleteConfirmation = true }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete recipe", tint = MaterialTheme.colorScheme.error)
+                    }
+                    TextButton(onClick = onEdit) { Text("Edit", color = MaterialTheme.colorScheme.primary) }
+                },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.background)
             )
         }
@@ -1701,7 +1792,9 @@ private fun RecipeDetail(
                         }
 
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            recipe.tags.forEach { AssistChip(onClick = {}, label = { Text(it) }) }
+                            recipe.tags.forEach { tag ->
+                                AssistChip(onClick = { onTagSelected(tag) }, label = { Text(tag) })
+                            }
                         }
 
                         Row(
@@ -1899,6 +1992,20 @@ private fun RecipeDetail(
             }
         }
     }
+
+    if (showDeleteConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmation = false },
+            title = { Text("Delete recipe?") },
+            text = { Text("${recipe.title} will be permanently removed from this device.") },
+            confirmButton = {
+                TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmation = false }) { Text("Cancel") }
+            }
+        )
+    }
 }
 
 @Composable
@@ -1950,7 +2057,7 @@ private fun CulinaryEmptyState(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun RecipeEditor(
     recipe: Recipe?,
@@ -1963,7 +2070,8 @@ private fun RecipeEditor(
     var sourceUrl by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.sourceUrl.orEmpty()) }
     var creator by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.creator.orEmpty()) }
     var category by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.category ?: "Saved to try") }
-    var tags by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.tags?.joinToString(", ").orEmpty()) }
+    var tags by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.tags.orEmpty()) }
+    var tagDraft by rememberSaveable(recipe?.id) { mutableStateOf("") }
     var ingredients by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.ingredients?.joinToString("\n").orEmpty()) }
     var steps by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.steps?.joinToString("\n").orEmpty()) }
     var notes by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.notes.orEmpty()) }
@@ -2004,7 +2112,7 @@ private fun RecipeEditor(
                     title = extracted.title
                     if (creator.isBlank() || creator.startsWith("http")) creator = extracted.creator
                     category = extracted.category
-                    tags = extracted.tags.joinToString(", ")
+                    tags = TagNormalizer.normalizeAll(extracted.tags)
                     ingredients = extracted.ingredients.joinToString("\n")
                     steps = extracted.steps.joinToString("\n")
                     if (extracted.notes.isNotBlank()) notes = extracted.notes
@@ -2065,7 +2173,7 @@ private fun RecipeEditor(
                                     title = extracted.title
                                     if (creator.isBlank() || creator.startsWith("http")) creator = extracted.creator
                                     category = extracted.category
-                                    tags = extracted.tags.joinToString(", ")
+                                    tags = TagNormalizer.normalizeAll(extracted.tags)
                                     ingredients = extracted.ingredients.joinToString("\n")
                                     steps = extracted.steps.joinToString("\n")
                                     if (extracted.notes.isNotBlank()) {
@@ -2197,7 +2305,7 @@ private fun RecipeEditor(
                                         title = extracted.title
                                         if (creator.isBlank() || creator.startsWith("http")) creator = extracted.creator
                                         category = extracted.category
-                                        tags = extracted.tags.joinToString(", ")
+                                        tags = TagNormalizer.normalizeAll(extracted.tags)
                                         ingredients = extracted.ingredients.joinToString("\n")
                                         steps = extracted.steps.joinToString("\n")
                                         if (extracted.notes.isNotBlank()) notes = extracted.notes
@@ -2227,7 +2335,14 @@ private fun RecipeEditor(
             item { Field("Instagram Link", sourceUrl) { sourceUrl = it } }
             item { Field("Creator / Chef", creator) { creator = it } }
             item { Field("Category", category) { category = it } }
-            item { Field("Tags (comma separated)", tags) { tags = it } }
+            item {
+                TagEditor(
+                    tags = tags,
+                    draft = tagDraft,
+                    onDraftChange = { tagDraft = it },
+                    onTagsChange = { tags = it }
+                )
+            }
             item { Field("Ingredients (one per line)", ingredients, minLines = 5) { ingredients = it } }
             item { Field("Cooking Steps (one per line)", steps, minLines = 5) { steps = it } }
             item { Field("Notes, Tips, & Prep Times", notes, minLines = 4) { notes = it } }
@@ -2247,7 +2362,7 @@ private fun RecipeEditor(
                                 sourceUrl = sourceUrl.trim(),
                                 creator = creator.trim(),
                                 category = category.ifBlank { "Saved to try" },
-                                tags = tags.split(",").map { it.trim() }.filter { it.isNotBlank() },
+                                tags = TagNormalizer.normalizeAll(tags + TagNormalizer.parse(tagDraft)),
                                 ingredients = ingredients.lines().map { it.trim() }.filter { it.isNotBlank() },
                                 steps = steps.lines().map { it.trim() }.filter { it.isNotBlank() },
                                 notes = notes.trim(),
@@ -2281,96 +2396,84 @@ private fun Field(label: String, value: String, minLines: Int = 1, onChange: (St
 }
 
 private fun copyUriToCacheFile(context: Context, uri: Uri): File? {
-    return runCatching {
-        val cacheDir = File(context.cacheDir, "shared_reels").apply { mkdirs() }
-        val file = File(cacheDir, "shared_video_${System.currentTimeMillis()}.mp4")
-        context.contentResolver.openInputStream(uri)?.use { input ->
+    val cacheDir = File(context.cacheDir, "shared_reels").apply { mkdirs() }
+    val file = File(cacheDir, "shared_video_${System.currentTimeMillis()}.mp4")
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+        inputStream.use { input ->
             FileOutputStream(file).use { output ->
-                input.copyTo(output)
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                var totalBytes = 0L
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    totalBytes += count
+                    require(totalBytes <= 200L * 1024L * 1024L) { "Video is larger than the 200 MB limit." }
+                    output.write(buffer, 0, count)
+                }
             }
         }
         if (file.exists() && file.length() > 0) file else null
-    }.getOrNull()
-}
-
-private fun MutableList<Recipe>.updateRecipe(id: Long, transform: Recipe.() -> Recipe) {
-    val index = indexOfFirst { it.id == id }
-    if (index >= 0) this[index] = this[index].transform()
-}
-
-private object RecipeStore {
-    private const val PREFS = "insta_recipe_store"
-    private const val KEY_RECIPES = "recipes"
-
-    fun load(context: Context): List<Recipe> {
-        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_RECIPES, null)
-        if (raw.isNullOrBlank()) return emptyList()
-        return runCatching {
-            val array = JSONArray(raw)
-            List(array.length()) { index -> array.getJSONObject(index).toRecipe() }
-        }.getOrDefault(emptyList())
+    } catch (error: Exception) {
+        file.delete()
+        throw error
     }
 
-    fun save(context: Context, recipes: List<Recipe>) {
-        val array = JSONArray()
-        recipes.forEach { array.put(it.toJson()) }
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_RECIPES, array.toString())
-            .apply()
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TagEditor(
+    tags: List<String>,
+    draft: String,
+    onDraftChange: (String) -> Unit,
+    onTagsChange: (List<String>) -> Unit
+) {
+    fun addDraft() {
+        val additions = TagNormalizer.parse(draft)
+        if (additions.isNotEmpty()) {
+            onTagsChange(TagNormalizer.normalizeAll(tags + additions))
+            onDraftChange("")
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { value ->
+                if (value.contains(',') || value.contains('\n')) {
+                    val segments = value.split(',', '\n')
+                    onTagsChange(TagNormalizer.normalizeAll(tags + segments.dropLast(1)))
+                    onDraftChange(segments.last())
+                } else {
+                    onDraftChange(value)
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Add tags") },
+            placeholder = { Text("e.g. Vegetarian, Quick") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { addDraft() }),
+            trailingIcon = {
+                if (draft.isNotBlank()) {
+                    TextButton(onClick = { addDraft() }) { Text("Add") }
+                }
+            },
+            shape = RoundedCornerShape(12.dp)
+        )
+        if (tags.isNotEmpty()) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                tags.forEach { tag ->
+                    InputChip(
+                        selected = false,
+                        onClick = { onTagsChange(tags.filterNot { TagNormalizer.key(it) == TagNormalizer.key(tag) }) },
+                        label = { Text(tag) },
+                        trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Remove $tag", modifier = Modifier.size(16.dp)) }
+                    )
+                }
+            }
+        }
+        Text("Press comma or Done to add a tag. Tap a tag to remove it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
-
-private fun Recipe.toJson(): JSONObject = JSONObject()
-    .put("id", id)
-    .put("title", title)
-    .put("sourceUrl", sourceUrl)
-    .put("creator", creator)
-    .put("category", category)
-    .put("tags", JSONArray(tags))
-    .put("ingredients", JSONArray(ingredients))
-    .put("steps", JSONArray(steps))
-    .put("notes", notes)
-    .put("favorite", favorite)
-    .put("cooked", cooked)
-    .put("status", status.name)
-    .put("savedDate", savedDate)
-
-private fun JSONObject.toRecipe(): Recipe = Recipe(
-    id = optLong("id"),
-    title = optString("title"),
-    sourceUrl = optString("sourceUrl"),
-    creator = optString("creator"),
-    category = optString("category", "Saved to try"),
-    tags = optJSONArray("tags").toStringList(),
-    ingredients = optJSONArray("ingredients").toStringList(),
-    steps = optJSONArray("steps").toStringList(),
-    notes = optString("notes"),
-    favorite = optBoolean("favorite"),
-    cooked = optBoolean("cooked"),
-    status = runCatching { RecipeStatus.valueOf(optString("status")) }.getOrDefault(RecipeStatus.Draft),
-    savedDate = optString("savedDate", LocalDate.now().toString())
-)
-
-private fun JSONArray?.toStringList(): List<String> {
-    if (this == null) return emptyList()
-    return List(length()) { index -> optString(index) }.filter { it.isNotBlank() }
-}
-
-private fun demoRecipes(): List<Recipe> = listOf(
-    Recipe(
-        id = 1,
-        title = "Paneer Pepper Toast",
-        sourceUrl = "https://www.instagram.com/reel/example",
-        creator = "Demo Chef",
-        category = "Snacks",
-        tags = listOf("Quick", "Vegetarian", "High protein"),
-        ingredients = listOf("200g paneer cubes", "4 bread slices", "1 diced bell pepper", "1 tsp chilli flakes"),
-        steps = listOf("Toast the bread until golden.", "Sauté paneer cubes and bell peppers with seasoning.", "Assemble on toast and serve hot."),
-        notes = "Prep time: 5 mins. Cook time: 10 mins.",
-        favorite = true,
-        cooked = false,
-        status = RecipeStatus.Saved,
-        savedDate = LocalDate.now().toString()
-    )
-)
