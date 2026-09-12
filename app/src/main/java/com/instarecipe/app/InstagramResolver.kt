@@ -66,8 +66,9 @@ object InstagramResolver {
         runCatching {
             val cacheDir = File(context.cacheDir, "shared_reels")
             if (cacheDir.exists() && cacheDir.isDirectory) {
+                val staleBefore = System.currentTimeMillis() - TimeUnit.HOURS.toMillis(1)
                 cacheDir.listFiles()?.forEach { file ->
-                    if (file.isFile) file.delete()
+                    if (file.isFile && file.lastModified() < staleBefore) file.delete()
                 }
             }
         }

@@ -9,6 +9,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -58,9 +59,9 @@ private val DarkColorScheme = darkColorScheme(
 val AppShapes = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
     small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(18.dp),
-    large = RoundedCornerShape(24.dp),
-    extraLarge = RoundedCornerShape(30.dp)
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(16.dp),
+    extraLarge = RoundedCornerShape(20.dp)
 )
 
 private val ElvaraSans = FontFamily(
@@ -78,7 +79,7 @@ val AppTypography = Typography(
     titleLarge = TextStyle(fontFamily = ElvaraSans, fontWeight = FontWeight.SemiBold, fontSize = 19.sp, lineHeight = 25.sp),
     titleMedium = TextStyle(fontFamily = ElvaraSans, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 22.sp),
     titleSmall = TextStyle(fontFamily = ElvaraSans, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 20.sp),
-    bodyLarge = TextStyle(fontFamily = ElvaraSans, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 24.sp),
+    bodyLarge = TextStyle(fontFamily = ElvaraSans, fontWeight = FontWeight.Normal, fontSize = 17.sp, lineHeight = 26.sp),
     bodyMedium = TextStyle(fontFamily = ElvaraSans, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 21.sp),
     bodySmall = TextStyle(fontFamily = ElvaraSans, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 18.sp),
     labelLarge = TextStyle(fontFamily = ElvaraSans, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 20.sp),
@@ -103,10 +104,23 @@ fun InstaRecipeTheme(themeMode: ThemeMode = ThemeMode.System, content: @Composab
             }
         }
     }
-    MaterialTheme(
-        colorScheme = if (useDarkTheme) DarkColorScheme else LightColorScheme,
-        shapes = AppShapes,
-        typography = AppTypography,
-        content = content
+    val recipeTypeScale = RecipeTypeScale(
+        body = AppTypography.bodyLarge,
+        ingredient = AppTypography.bodyLarge.copy(fontSize = 16.sp, lineHeight = 25.sp),
+        instruction = AppTypography.headlineSmall.copy(fontSize = 22.sp, lineHeight = 32.sp, fontWeight = FontWeight.Medium),
+        quantity = AppTypography.bodyLarge.copy(fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
+        metadata = AppTypography.labelMedium.copy(fontSize = 13.sp, lineHeight = 18.sp),
+        sectionTitle = AppTypography.titleLarge.copy(fontSize = 20.sp, lineHeight = 26.sp)
     )
+    CompositionLocalProvider(
+        LocalRecipeTypeScale provides recipeTypeScale,
+        LocalReducedMotion provides systemReducedMotionEnabled()
+    ) {
+        MaterialTheme(
+            colorScheme = if (useDarkTheme) DarkColorScheme else LightColorScheme,
+            shapes = AppShapes,
+            typography = AppTypography,
+            content = content
+        )
+    }
 }

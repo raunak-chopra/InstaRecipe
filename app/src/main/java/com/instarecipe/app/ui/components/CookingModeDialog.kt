@@ -3,6 +3,9 @@ package com.instarecipe.app.ui.components
 import android.app.Activity
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -73,6 +76,9 @@ import com.instarecipe.app.ui.theme.HerbMuted
 import com.instarecipe.app.ui.theme.SuccessSage
 import com.instarecipe.app.ui.theme.ToastedSesame
 import com.instarecipe.app.ui.theme.WarmSaffron
+import com.instarecipe.app.ui.theme.AppMotion
+import com.instarecipe.app.ui.theme.LocalRecipeTypeScale
+import com.instarecipe.app.ui.theme.LocalReducedMotion
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -97,19 +103,6 @@ fun CookingModeDialog(
 
     var currentStepIndex by remember { mutableIntStateOf(0) }
     var showIngredientsSummary by remember { mutableStateOf(false) }
-
-    // Kitchen Timer State
-    var timerSecondsRemaining by remember { mutableIntStateOf(0) }
-    var isTimerRunning by remember { mutableStateOf(false) }
-
-    LaunchedEffect(isTimerRunning, timerSecondsRemaining) {
-        if (isTimerRunning && timerSecondsRemaining > 0) {
-            delay(1000L)
-            timerSecondsRemaining -= 1
-        } else if (timerSecondsRemaining == 0) {
-            isTimerRunning = false
-        }
-    }
 
     val totalSteps = steps.size.coerceAtLeast(1)
     val progress = (currentStepIndex + 1).toFloat() / totalSteps.toFloat()
@@ -225,7 +218,7 @@ fun CookingModeDialog(
                         .weight(1f)
                         .padding(vertical = 16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    shape = RoundedCornerShape(24.dp),
+                    shape = MaterialTheme.shapes.medium,
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
                     Column(
@@ -243,15 +236,21 @@ fun CookingModeDialog(
                                 letterSpacing = 1.sp
                             )
                             Spacer(Modifier.height(16.dp))
-                            Text(
-                                text = if (steps.isNotEmpty()) steps[currentStepIndex] else "No steps specified for this recipe.",
-                                style = MaterialTheme.typography.headlineMedium.copy(
-                                    fontSize = 21.sp,
-                                    lineHeight = 30.sp
+                            val reducedMotion = LocalReducedMotion.current
+                            Crossfade(
+                                targetState = currentStepIndex,
+                                animationSpec = if (reducedMotion) snap() else tween(
+                                    durationMillis = AppMotion.content,
+                                    easing = AppMotion.standardEasing
                                 ),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontWeight = FontWeight.Medium
-                            )
+                                label = "cooking step"
+                            ) { stepIndex ->
+                                Text(
+                                    text = if (steps.isNotEmpty()) steps[stepIndex] else "No steps specified for this recipe.",
+                                    style = LocalRecipeTypeScale.current.instruction,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
 
                         // Toggle ingredients sheet
@@ -279,7 +278,7 @@ fun CookingModeDialog(
                                             .padding(10.dp),
                                         verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
-                                        items(ingredients) { ing ->
+                                        items(ingredients, contentType = { "ingredient" }) { ing ->
                                             Text(
                                                 "• $ing",
                                                 style = MaterialTheme.typography.bodySmall,
@@ -295,79 +294,7 @@ fun CookingModeDialog(
 
                 // Bottom Section: Built-in Kitchen Timer & Navigation Controls
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // Kitchen Timer Widget
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Timer,
-                                    contentDescription = null,
-                                    tint = if (isTimerRunning) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
-                                )
-                                val mins = timerSecondsRemaining / 60
-                                val secs = timerSecondsRemaining % 60
-                                Text(
-                                    text = String.format(Locale.getDefault(), "%02d:%02d", mins, secs),
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (timerSecondsRemaining > 0) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-
-                            // Presets & Controls
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                TextButton(
-                                    onClick = {
-                                        timerSecondsRemaining += 60
-                                        isTimerRunning = true
-                                    }
-                                ) {
-                                    Text("+1m", fontWeight = FontWeight.SemiBold)
-                                }
-                                TextButton(
-                                    onClick = {
-                                        timerSecondsRemaining += 300
-                                        isTimerRunning = true
-                                    }
-                                ) {
-                                    Text("+5m", fontWeight = FontWeight.SemiBold)
-                                }
-
-                                if (timerSecondsRemaining > 0) {
-                                    IconButton(onClick = { isTimerRunning = !isTimerRunning }) {
-                                        Icon(
-                                            if (isTimerRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                            contentDescription = "Toggle Timer",
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                    IconButton(onClick = {
-                                        timerSecondsRemaining = 0
-                                        isTimerRunning = false
-                                    }) {
-                                        Icon(
-                                            Icons.Default.Refresh,
-                                            contentDescription = "Reset Timer",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    KitchenTimer()
 
                     // Navigation Actions
                     Row(
@@ -417,6 +344,65 @@ fun CookingModeDialog(
                                 Text("Finish & Mark Cooked")
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Owns ticking state so one-second updates do not invalidate the full cooking dialog. */
+@Composable
+private fun KitchenTimer() {
+    var secondsRemaining by remember { mutableIntStateOf(0) }
+    var isRunning by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isRunning) {
+        while (isRunning && secondsRemaining > 0) {
+            delay(1000L)
+            secondsRemaining -= 1
+        }
+        if (secondsRemaining == 0) isRunning = false
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = MaterialTheme.shapes.medium,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(
+                    Icons.Default.Timer,
+                    contentDescription = null,
+                    tint = if (isRunning) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = String.format(Locale.getDefault(), "%02d:%02d", secondsRemaining / 60, secondsRemaining % 60),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = if (secondsRemaining > 0) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                TextButton(onClick = { secondsRemaining += 60; isRunning = true }) { Text("+1m", fontWeight = FontWeight.SemiBold) }
+                TextButton(onClick = { secondsRemaining += 300; isRunning = true }) { Text("+5m", fontWeight = FontWeight.SemiBold) }
+                if (secondsRemaining > 0) {
+                    IconButton(onClick = { isRunning = !isRunning }) {
+                        Icon(
+                            if (isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isRunning) "Pause timer" else "Resume timer",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(onClick = { secondsRemaining = 0; isRunning = false }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Reset timer", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }

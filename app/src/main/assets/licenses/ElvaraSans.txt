@@ -1,0 +1,11 @@
+Elvara Sans font family
+
+Source package:
+C:\Users\rauna\Downloads\Envato_Organized\Fonts\elvara-sans-2026-05-12-23-50-30-utc
+
+Bundled weights: Regular, Medium, SemiBold, Bold.
+
+The project owner supplied this asset from their licensed Envato Elements library and
+confirmed that the assets in that library are licensed for this project. Keep this
+notice with redistributed source packages. The applicable commercial license and
+download registration remain with the project owner's Envato account.

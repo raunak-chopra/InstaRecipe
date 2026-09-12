@@ -48,6 +48,9 @@ interface RecipeDao {
 
     @Query("SELECT COUNT(*) FROM recipes")
     suspend fun count(): Int
+
+    @Query("SELECT * FROM recipes WHERE normalizedSourceUrl = :sourceUrl LIMIT 1")
+    suspend fun findByNormalizedSourceUrl(sourceUrl: String): RecipeEntity?
 }
 
 @Database(entities = [RecipeEntity::class], version = 1, exportSchema = false)
@@ -72,6 +75,11 @@ class RecipeRepository private constructor(private val dao: RecipeDao) {
 
     suspend fun upsert(recipe: Recipe) = dao.upsert(recipe.toEntity())
     suspend fun delete(id: Long) = dao.delete(id)
+    suspend fun findBySourceUrl(sourceUrl: String): Recipe? {
+        val normalized = InstagramResolver.extractInstagramUrl(sourceUrl).orEmpty()
+            .ifBlank { sourceUrl.trim() }
+        return dao.findByNormalizedSourceUrl(normalized)?.toRecipe()
+    }
 
     suspend fun migrateLegacyPreferences(context: Context) {
         val migrationPrefs = context.getSharedPreferences("insta_recipe_migrations", Context.MODE_PRIVATE)

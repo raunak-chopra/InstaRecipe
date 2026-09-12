@@ -9,6 +9,12 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -97,6 +103,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -128,6 +135,7 @@ import com.instarecipe.app.ui.components.FilterIconType
 import com.instarecipe.app.ui.components.ModernRecipeCard
 import com.instarecipe.app.ui.components.ServingScaler
 import com.instarecipe.app.ui.components.ServingScalerSelector
+import com.instarecipe.app.ui.screens.SearchTabScreen
 import com.instarecipe.app.ui.theme.AlertPaprika
 import com.instarecipe.app.ui.theme.AlertPaprikaContainer
 import com.instarecipe.app.ui.theme.BorderSubtle
@@ -139,6 +147,9 @@ import com.instarecipe.app.ui.theme.GoldenHoneyContainer
 import com.instarecipe.app.ui.theme.HerbMuted
 import com.instarecipe.app.ui.theme.HerbSubtle
 import com.instarecipe.app.ui.theme.InstaRecipeTheme
+import com.instarecipe.app.ui.theme.AppMotion
+import com.instarecipe.app.ui.theme.LocalRecipeTypeScale
+import com.instarecipe.app.ui.theme.LocalReducedMotion
 import com.instarecipe.app.ui.theme.ThemeMode
 import com.instarecipe.app.ui.theme.SuccessSage
 import com.instarecipe.app.ui.theme.SuccessSageContainer
@@ -246,6 +257,7 @@ enum class RecipeStatus {
     Saved
 }
 
+@Immutable
 data class Recipe(
     val id: Long,
     val title: String,
@@ -401,114 +413,12 @@ private fun InstaRecipeApp(
                     return@LaunchedEffect
                 }
 
-                // Start full AI resolution and extraction pipeline
-                coroutineScope.launch {
-                    extractionProgress = ExtractionProgress(
-                        isExtracting = true,
-                        stage = "Checking Instagram reel & resolving video...",
-                        sourceUrl = targetUrl
-                    )
-                    var resolutionFile: File? = null
-                    try {
-                        val customResolver = GeminiRecipeExtractor.getCustomResolver(context).ifBlank { null }
-                        val resolution = InstagramResolver.resolveAndDownload(
-                            context = context,
-                            instagramUrl = targetUrl,
-                            customResolverUrl = customResolver,
-                            supplementaryText = payload.content,
-                            onStatusUpdate = { stage ->
-                                extractionProgress = extractionProgress.copy(stage = stage)
-                            }
-                        )
-                        resolutionFile = resolution.videoFile
-
-                        val hasVideo = resolution.videoFile != null && resolution.videoFile.exists() && resolution.videoFile.length() > 0
-                        val candidateCaption = resolution.caption.takeIf { GeminiRecipeExtractor.hasSubstantiveRecipeContent(it) }
-                            ?: InstagramResolver.extractCaptionFromSharedText(payload.content, targetUrl)
-
-                        // GUARD: Prevent hallucinating a steak recipe if no video or recipe caption is available
-                        if (!hasVideo && candidateCaption.isNullOrBlank()) {
-                            val draft = Recipe(
-                                id = (recipes.maxOfOrNull { it.id } ?: 0L) + 1L,
-                                title = resolution.creator?.let { "$it's Recipe Draft" } ?: "Instagram Recipe Draft",
-                                sourceUrl = targetUrl,
-                                creator = resolution.creator.orEmpty(),
-                                category = "Saved to try",
-                                tags = listOf("Instagram", "Needs Video/Caption"),
-                                ingredients = emptyList(),
-                                steps = emptyList(),
-                                notes = "Source: $targetUrl\n\n[Instagram restricted automated video download. Tap 'Attach Video' to pick the downloaded reel, or paste the post caption to extract with Gemini AI.]",
-                                favorite = false,
-                                cooked = false,
-                                status = RecipeStatus.Draft,
-                                savedDate = LocalDate.now().toString()
-                            )
-                            viewModel.upsert(draft)
-                            editingRecipe = draft
-                            extractionProgress = ExtractionProgress(
-                                isExtracting = false,
-                                error = "Instagram restricted automated video download. You can attach the saved reel video from your gallery or paste the post caption to extract."
-                            )
-                            return@launch
-                        }
-
-                        val extracted = GeminiRecipeExtractor.extractRecipe(
-                            context = context,
-                            videoFile = resolution.videoFile,
-                            textCaption = candidateCaption,
-                            sourceUrl = targetUrl,
-                            creatorName = resolution.creator,
-                            onStatus = { stage ->
-                                extractionProgress = extractionProgress.copy(stage = stage)
-                            }
-                        )
-
-                        val newRecipe = Recipe(
-                            id = (recipes.maxOfOrNull { it.id } ?: 0L) + 1L,
-                            title = extracted.title,
-                            sourceUrl = extracted.sourceUrl,
-                            creator = extracted.creator,
-                            category = extracted.category,
-                            tags = extracted.tags,
-                            ingredients = extracted.ingredients,
-                            steps = extracted.steps,
-                            notes = extracted.notes,
-                            favorite = false,
-                            cooked = false,
-                            status = RecipeStatus.Draft,
-                            savedDate = LocalDate.now().toString()
-                        )
-                        viewModel.upsert(newRecipe)
-                        editingRecipe = newRecipe
-                        extractionProgress = ExtractionProgress(isExtracting = false)
-                    } catch (e: Exception) {
-                        // Create fallback draft so user doesn't lose the share
-                        val fallback = Recipe(
-                            id = (recipes.maxOfOrNull { it.id } ?: 0L) + 1L,
-                            title = "Instagram Recipe Draft",
-                            sourceUrl = targetUrl,
-                            creator = "",
-                            category = "Saved to try",
-                            tags = listOf("Instagram", "Manual review"),
-                            ingredients = emptyList(),
-                            steps = emptyList(),
-                            notes = "${payload.content}\n\n[Extraction notice: ${e.message}]",
-                            favorite = false,
-                            cooked = false,
-                            status = RecipeStatus.Draft,
-                            savedDate = LocalDate.now().toString()
-                        )
-                        viewModel.upsert(fallback)
-                        editingRecipe = fallback
-                        extractionProgress = ExtractionProgress(
-                            isExtracting = false,
-                            error = "Could not extract video automatically: ${e.message}. You can attach the video or paste the caption."
-                        )
-                    } finally {
-                        resolutionFile?.delete()
-                        InstagramResolver.cleanCachedReelVideos(context)
-                    }
-                }
+                InstagramExtractionWork.enqueue(
+                    context = context,
+                    sourceUrl = targetUrl,
+                    sharedText = payload.content
+                )
+                extractionProgress = ExtractionProgress(isExtracting = false)
             }
 
             is SharePayload.Video -> {
@@ -741,6 +651,9 @@ private fun MainScaffold(
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit
 ) {
+    val savedRecipes = remember(recipes) { recipes.filter { it.status == RecipeStatus.Saved } }
+    val draftRecipes = remember(recipes) { recipes.filter { it.status == RecipeStatus.Draft } }
+    val reducedMotion = LocalReducedMotion.current
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -880,9 +793,21 @@ private fun MainScaffold(
                 }
             }
 
-            when (selectedTab) {
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    if (reducedMotion) {
+                        fadeIn(snap()) togetherWith fadeOut(snap())
+                    } else {
+                        fadeIn(tween(AppMotion.content, easing = AppMotion.standardEasing)) togetherWith
+                            fadeOut(tween(AppMotion.state, easing = AppMotion.standardEasing))
+                    }
+                },
+                label = "tab content",
+                modifier = Modifier.weight(1f)
+            ) { activeTab -> when (activeTab) {
                 Tab.Library -> LibraryTabScreen(
-                    recipes = recipes.filter { it.status == RecipeStatus.Saved },
+                    recipes = savedRecipes,
                     selectedFilterId = libraryFilterId,
                     onFilterSelected = onLibraryFilterSelected,
                     onOpen = onOpen,
@@ -893,7 +818,7 @@ private fun MainScaffold(
                 )
 
                 Tab.Inbox -> InboxTabScreen(
-                    drafts = recipes.filter { it.status == RecipeStatus.Draft },
+                    drafts = draftRecipes,
                     onOpen = onOpen,
                     onToggleFavorite = onToggleFavorite,
                     onToggleCooked = onToggleCooked,
@@ -915,7 +840,7 @@ private fun MainScaffold(
                     themeMode = themeMode,
                     onThemeModeChange = onThemeModeChange
                 )
-            }
+            } }
         }
     }
 }
@@ -1010,7 +935,7 @@ private fun LibraryTabScreen(
                 )
             }
         } else {
-            items(filteredRecipes, key = { it.id }) { recipe ->
+            items(filteredRecipes, key = { it.id }, contentType = { "recipe-card" }) { recipe ->
                 Box(modifier = Modifier.padding(horizontal = 20.dp)) {
                     ModernRecipeCard(
                         recipe = recipe,
@@ -1025,15 +950,6 @@ private fun LibraryTabScreen(
         }
     }
 }
-private fun isQuickRecipe(recipe: Recipe): Boolean {
-    if (TagNormalizer.matches(recipe.tags, "Quick")) return true
-    val minuteValues = Regex("""(?i)(?:prep|cook|total)?\s*time:?\s*(\d+)\s*(?:mins?|minutes?)""")
-        .findAll(recipe.notes)
-        .mapNotNull { it.groupValues.getOrNull(1)?.toIntOrNull() }
-        .toList()
-    return minuteValues.isNotEmpty() && minuteValues.sum() <= 20
-}
-
 @Composable
 private fun InboxTabScreen(
     drafts: List<Recipe>,
@@ -1104,86 +1020,13 @@ private fun InboxTabScreen(
                 )
             }
         } else {
-            items(drafts, key = { it.id }) { draft ->
+            items(drafts, key = { it.id }, contentType = { "recipe-card" }) { draft ->
                 ModernRecipeCard(
                     recipe = draft,
                     onOpen = { onOpen(draft) },
                     onToggleFavorite = { onToggleFavorite(draft) },
                     onToggleCooked = { onToggleCooked(draft) },
                     onStartCooking = { onStartCooking(draft) },
-                    onTagClick = onTagSelected
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SearchTabScreen(
-    recipes: List<Recipe>,
-    onOpen: (Recipe) -> Unit,
-    onToggleFavorite: (Recipe) -> Unit,
-    onToggleCooked: (Recipe) -> Unit,
-    onStartCooking: (Recipe) -> Unit,
-    onTagSelected: (String) -> Unit
-) {
-    var query by rememberSaveable { mutableStateOf("") }
-    val filtered = remember(query, recipes) {
-        recipes.filter { recipe ->
-            val haystack = buildString {
-                append(recipe.title).append(" ")
-                append(recipe.creator).append(" ")
-                append(recipe.category).append(" ")
-                append(recipe.tags.joinToString(" ")).append(" ")
-                append(recipe.ingredients.joinToString(" ")).append(" ")
-                append(recipe.steps.joinToString(" ")).append(" ")
-                append(recipe.notes)
-            }
-            haystack.contains(query, ignoreCase = true)
-        }
-    }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Pantry & Recipe Search", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Search by ingredient, dish name, or chef...") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                    shape = RoundedCornerShape(16.dp)
-                )
-            }
-        }
-
-        if (query.isBlank()) {
-            item {
-                CulinaryEmptyState(
-                    title = "What's in your fridge?",
-                    message = "Type ingredients like 'paneer', 'garlic', 'quinoa', or dishes like 'pasta' to find recipes."
-                )
-            }
-        } else if (filtered.isEmpty()) {
-            item {
-                CulinaryEmptyState(
-                    title = "No recipes found",
-                    message = "No recipes matched '$query'. Try another ingredient or save a new reel!"
-                )
-            }
-        } else {
-            items(filtered, key = { it.id }) { recipe ->
-                ModernRecipeCard(
-                    recipe = recipe,
-                    onOpen = { onOpen(recipe) },
-                    onToggleFavorite = { onToggleFavorite(recipe) },
-                    onToggleCooked = { onToggleCooked(recipe) },
-                    onStartCooking = { onStartCooking(recipe) },
                     onTagClick = onTagSelected
                 )
             }
@@ -1742,9 +1585,10 @@ private fun RecipeDetail(
             // Header Info Card
             item {
                 Card(
-                    shape = RoundedCornerShape(20.dp),
+                    shape = MaterialTheme.shapes.medium,
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(
@@ -1870,9 +1714,9 @@ private fun RecipeDetail(
             // Ingredients Section with Serving Scaler & Interactive Checkbox
             item {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background),
+                    shape = RoundedCornerShape(0.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(
@@ -1917,7 +1761,7 @@ private fun RecipeDetail(
                                     Spacer(Modifier.size(6.dp))
                                     Text(
                                         text = scaledIngredient,
-                                        style = MaterialTheme.typography.bodyLarge,
+                                        style = LocalRecipeTypeScale.current.ingredient,
                                         color = if (isChecked) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
                                         textDecoration = if (isChecked) TextDecoration.LineThrough else null
                                     )
@@ -1931,9 +1775,9 @@ private fun RecipeDetail(
             // Steps Section
             item {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background),
+                    shape = RoundedCornerShape(0.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         Text("Instructions", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -1962,7 +1806,7 @@ private fun RecipeDetail(
                                     }
                                     Text(
                                         text = step,
-                                        style = MaterialTheme.typography.bodyLarge,
+                                        style = LocalRecipeTypeScale.current.body,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.weight(1f)
                                     )
@@ -1978,7 +1822,8 @@ private fun RecipeDetail(
                 item {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-                        shape = RoundedCornerShape(20.dp)
+                        shape = MaterialTheme.shapes.small,
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                     ) {
                         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2009,7 +1854,7 @@ private fun RecipeDetail(
 }
 
 @Composable
-private fun CulinaryEmptyState(
+internal fun CulinaryEmptyState(
     title: String,
     message: String,
     modifier: Modifier = Modifier
@@ -2019,7 +1864,7 @@ private fun CulinaryEmptyState(
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(24.dp),
+        shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Column(
