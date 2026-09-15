@@ -1,18 +1,38 @@
 # InstaRecipe Development & Update Log
 
 ## Project Summary
-**InstaRecipe** is a native Android personal cookbook application designed to save and organize recipes discovered on Instagram. Users can share Instagram cooking Reels (or local video files) directly into the app, which resolves the video stream and uses **Gemini 2.0 Flash Multimodal AI** to watch the video, listen to speech, read on-screen text overlays, and automatically generate structured, editable recipes with direct references back to the original Instagram post.
+**InstaRecipe** is a native Android personal cookbook application designed to save and organize recipes discovered on Instagram. Users can share Instagram cooking Reels (or local video files) directly into the app, which resolves public video content and uses **Gemini 3.8 Flash** to generate structured, editable recipes with direct references back to the original Instagram post.
 
 ---
 
 ## Release & Version History
 
-### Unreleased: Reliability, Local Data, Tags & Recipe Cards
+### Unreleased: Gemini 3.8, Security, Data Integrity & Toolchain
+
+- Defined the encrypted key order as free primary then paid fallback. Connection checks now run concurrently with a 12-second deadline, timeout and Files API failures can use the paid key, and Gemini failures are not retried again by WorkManager.
+- Simplified the consumer shell to three destinations (Cookbook, Imports, Settings), moved search into Cookbook, added a unified Add recipe sheet, made recipe cards open directly, hid technical controls under Advanced settings, and replaced prominent AI/diagnostic copy with task-focused language.
+- Standardized all AI extraction and connection testing on `gemini-3.8-flash`; removed obsolete 2.x/1.x selection and fallback paths.
+- Replaced blocking OkHttp calls with coroutine-cancellable calls, bounded retries, separate generation/upload timeouts, safe user-facing failures, and bounded best-effort remote-file cleanup.
+- Removed Instagram cookie/session extraction and public community-resolver defaults. Only public Instagram metadata or an explicitly configured HTTPS resolver is used.
+- Added HTTPS-only redirect validation, local/private-address rejection, video MIME checks, 200 MB limits, storage checks, and partial-file cleanup.
+- Added explicit confirmation before external shares trigger network/AI processing and made share intents one-shot after acceptance.
+- Migrated Room to generated primary keys with an explicit v1-to-v2 migration, unique normalized source URLs, conflict-safe updates, exported schemas, and a migration instrumentation test.
+- Added constructor-injected recipe storage, saveable editor/detail/cooking state, precise serving scaling, and stable accessible ingredient toggles.
+- Upgraded to Gradle 9.7.1, AGP 9.4, Kotlin 2.4.20, API 37, Compose BOM 2026.09, Lifecycle 2.11, WorkManager 2.11.2, OkHttp 5.5, coroutines 1.11, KSP, and a version catalog.
+- Enabled release shrinking/obfuscation and added unit coverage for the fixed Gemini model and serving scaling.
+- Extracted main, detail, and editor Compose screens from `MainActivity`, propagated generated Room IDs before opening saved recipes, and added a regression test for persisted identity.
+- Moved gallery/shared-video extraction into ViewModel-owned state so accepted imports and progress survive Activity recreation; added duplicate-start, retained-completion, error, cancellation-aware I/O, and cleanup safeguards.
+- Completed the Gradle 9.7.1 wrapper upgrade with the official distribution and bootstrap-JAR checksums.
+- Replaced manual Gemini JSON parsing with typed kotlinx.serialization DTOs and added MockWebServer coverage for success, malformed/error responses, retries, cancellation, Files API uploads, and remote cleanup.
+- Added encrypted primary and backup Gemini keys with selective failover; accepted Reel links run through WorkManager, successful extraction auto-saves into the cookbook, and failed drafts can be reclaimed by sharing the link again.
+- Verification evidence is recorded in `IMPLEMENTATION_DIFF.md`.
+
+### Previous unreleased work: Reliability, Local Data, Tags & Recipe Cards
 
 - Migrated recipes to Room with a one-time, failure-safe import of the previous on-device recipe data.
 - Added lifecycle-aware database state, recipe deletion confirmation, and system-back handling for detail, editor, and cooking views.
 - Encrypted the Gemini API key with Android Keystore, moved API authentication to request headers, and added large-video processing checks and cleanup.
-- Retained optional in-app Instagram sign-in while restricting the WebView to secure Instagram navigation and keeping cookies in the WebView store.
+- Previously retained optional in-app Instagram sign-in; this has now been removed by the security upgrade above.
 - Added normalized editable tags, tag-aware search and cookbook filtering, and dynamic tag filter chips.
 - Reworked recipe tiles as elevated flip cards: card tap reveals main ingredients while dedicated View and Cook actions enter the recipe flows.
 - Updated the Android/API 36 build stack and added unit coverage for tag normalization and Instagram URL canonicalization.
@@ -29,7 +49,7 @@
 - Improved compact-screen behavior in the Inbox import panel, raised recipe-card action targets to 48dp, clarified stateful accessibility labels, and obscured the Gemini API key by default.
 - Removed unnecessary media-library permissions; document-picker and shared-URI flows retain scoped access.
 - Added a monochrome adaptive launcher asset for Android themed icons and corrected the manifest to use the adaptive launcher resource.
-- Verification: `:app:assembleDebug` and `:app:lintDebug` both pass. Lint reports 0 errors; remaining warnings are non-blocking dependency/target-version, deliberate WebView JavaScript, and legacy unused-resource notices.
+- Historical verification at v0.3.1: `:app:assembleDebug` and `:app:lintDebug` passed with 0 lint errors. Current verification is recorded in `IMPLEMENTATION_DIFF.md`.
 - Visual QA status: manual code/token review complete; device screenshots remain pending because no emulator or Android device was connected.
 
 ---

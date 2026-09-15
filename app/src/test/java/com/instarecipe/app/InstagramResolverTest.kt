@@ -17,4 +17,9 @@ class InstagramResolverTest {
     fun unrelatedTextHasNoInstagramUrl() {
         assertNull(InstagramResolver.extractInstagramUrl("A recipe without a social link"))
     }
+
+    @Test
+    fun insecureInstagramUrlIsRejected() {
+        assertNull(InstagramResolver.extractInstagramUrl("http://instagram.com/reel/AbC_123-/"))
+    }
 }

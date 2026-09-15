@@ -1,312 +1,168 @@
 # InstaRecipe: Planned vs Implemented
 
-Last updated: 2026-09-09
-
-## Product Direction
-
-InstaRecipe is planned as a personal Android recipe library for saving recipe videos discovered on Instagram.
-
-The app should let the user share an Instagram Reel or post into the app, create a recipe draft, use online AI to extract structured recipe details where possible, and save the final cleaned recipe on the device.
-
-The first version is Android-only, personal-use, and local-storage-first.
-
-## Planned Scope
-
-### Platform
-
-- Android mobile app.
-- Native Android recommended.
-- Kotlin.
-- Jetpack Compose UI.
-- Room database for local storage.
-- Android share target for receiving Instagram links.
-- Online AI service for recipe extraction.
-
-### Core User Flow
-
-1. User finds a recipe video on Instagram.
-2. User taps Share in Instagram.
-3. User chooses InstaRecipe from the Android share sheet.
-4. App receives the Instagram link.
-5. App creates a recipe draft in the Inbox.
-6. User adds or pastes caption/notes if needed.
-7. AI suggests title, ingredients, steps, tags, category, and metadata.
-8. User reviews and edits the AI output.
-9. User saves the recipe to the local library.
-10. User later searches and filters saved recipes.
-
-### Planned App Sections
-
-- Inbox.
-- Library.
-- Search.
-- Categories.
-- Favorites.
-- Settings.
-
-### Planned Recipe Fields
-
-- Title.
-- Instagram source URL.
-- Creator name.
-- Category.
-- Tags.
-- Cuisine.
-- Meal type.
-- Ingredients.
-- Cooking steps.
-- Prep time.
-- Cook time.
-- Servings.
-- Difficulty.
-- Dietary labels.
-- Personal notes.
-- Favorite status.
-- Cooked-before status.
-- Date saved.
-- Last cooked date.
-- AI extraction confidence.
-- Original pasted caption or notes.
-
-### Planned AI Behavior
-
-AI should assist with recipe extraction, not silently decide final saved content.
-
-The app should:
-
-- Accept caption text, shared text, user notes, screenshots, or other user-provided content.
-- Extract structured recipe fields.
-- Show a review screen before saving.
-- Mark weak extractions clearly.
-- Avoid inventing details when source information is incomplete.
-
-Suggested AI confidence states:
-
-- Good.
-- Needs review.
-- Missing ingredients.
-- Missing steps.
-- Link only.
-
-### Planned Search
-
-Search should cover:
-
-- Recipe title.
-- Ingredients.
-- Steps.
-- Category.
-- Tags.
-- Cuisine.
-- Creator name.
-- Notes.
-- Dietary labels.
-
-### Planned Categories
-
-Initial categories:
-
-- Breakfast.
-- Lunch.
-- Dinner.
-- Snacks.
-- Desserts.
-- Drinks.
-- Meal prep.
-- High protein.
-- Vegetarian.
-- Non-vegetarian.
-- Quick recipes.
-- Saved to try.
-- Cooked before.
-- Favorites.
-
-## Current Implementation
-
-No app implementation exists yet.
-
-The repository currently contains only this planning/difference note.
-
-- Planned vs implemented tracking document.
-- Android project scaffold.
-- Native Kotlin app structure.
-- Jetpack Compose UI.
-- Main navigation for Library, Inbox, Search, and Settings.
-- Recipe list cards.
-- Recipe detail screen.
-- Recipe review/edit screen.
-- Manual recipe creation.
-- Favorite toggle.
-- Cooked-before toggle.
-- Basic category and tag support.
-- Basic local search across title, creator, category, tags, ingredients, steps, and notes.
-- Android text share target for receiving Instagram links.
-- Android video share target (`video/*`) for receiving downloaded reels and gallery videos.
-- Instagram URL detection and cleaning.
-- Instagram video resolution and downloading via public Cobalt API endpoints.
-- Multimodal AI extraction using Gemini 2.0 Flash (video visual analysis, audio voiceover transcription, on-screen text recognition).
-- Structured recipe generation (title, ingredients, instructions, category, tags, prep/cook times).
-- Inbox draft review and direct Instagram source link reference.
-- Settings screen for Gemini API key configuration, connection testing, and custom resolvers.
-- On-device persistence using Android SharedPreferences.
-
-Not implemented:
-
-- Room database.
-- Export or backup.
-- Screenshot import.
-- Advanced filters.
-- Ratings.
-- Cooked history beyond the current cooked toggle.
-- Automated unit tests.
-
-## Implementation Gap
-
-The core Instagram video-to-recipe AI workflow is now implemented and verified with a working debug APK build.
-
-The next implementation step is to replace the temporary SharedPreferences persistence with Room and then add the AI extraction workflow.
-
-## MVP Target
-
-The first milestone should prove this flow:
-
-1. Receive or manually paste an Instagram link. Implemented.
-2. Create a recipe draft. Implemented for shared Instagram links.
-3. Edit recipe details manually. Implemented.
-4. Save the recipe locally. Implemented with SharedPreferences.
-5. View saved recipes in a library. Implemented.
-6. Search saved recipes. Implemented.
-7. Open the original Instagram link from the recipe detail screen. Implemented.
-
-AI should be added after this base flow works.
-
-## Recommended Build Phases
-
-### Phase 1: Local Recipe Library
-
-Planned:
-
-- Native Android project.
-- Compose UI.
-- Room database.
-- Recipe list.
-- Recipe detail screen.
-- Add/edit recipe screen.
-- Categories and tags.
-- Favorites.
-- Cooked-before toggle.
-- Basic search.
-
-Implemented:
-
-- Android project scaffold.
-- Compose UI.
-- Local persistence using SharedPreferences.
-- Recipe list.
-- Recipe detail screen.
-- Add/edit recipe screen.
-- Categories and tags.
-- Favorites.
-- Cooked-before toggle.
-- Basic search.
-
-Still planned:
-
-- Room database.
-- More robust recipe field validation.
-- Automated tests.
-
-### Phase 2: Instagram Share Capture
-
-Planned:
-
-- Android share target.
-- Receive shared text/links.
-- Detect Instagram URLs.
-- Create draft recipe in Inbox.
-- Prevent duplicate saved links.
-
-Implemented:
-
-- Android share target for text/plain shares.
-- Instagram URL detection.
-- Draft recipe creation in Inbox.
-- Duplicate saved-link prevention.
-
-Still planned:
-
-- More robust URL cleanup. Implemented.
-- Better handling for non-Instagram shared text. Implemented.
-- User feedback when a shared item has no Instagram URL. Implemented.
-
-### Phase 3: AI Extraction
-
-Planned:
-
-- AI settings.
-- API key handling.
-- Caption/notes input.
-- Structured recipe extraction.
-- Review-before-save screen.
-- Confidence and missing-field warnings.
-- Multimodal video and audio extraction.
-
-Implemented:
-
-- AI settings screen with live connection test.
-- Gemini API key storage in SharedPreferences.
-- Gemini 2.0 Flash multimodal video/audio/visuals recipe extraction.
-- Structured recipe JSON schema output (ingredients, steps, tags, prep/cook times).
-- Review-before-save editor screen with manual re-extract option.
-- Automatic fallback to caption/notes parsing.
-
-### Phase 4: Rich Capture
-
-Planned:
-
-- Screenshot import.
-- Text extraction from screenshots.
-- Better extraction from incomplete recipe posts.
-
-Implemented:
-
-- Direct video file share (`video/*`) import from gallery/files.
-
-### Phase 5: Personal Cookbook Polish & Brand Identity
-
-Planned:
-
-- Ratings.
-- Cooked history.
-- Advanced filters.
-- Export to JSON or CSV.
-- Optional backup.
-- Better empty/loading/error states.
-- Dedicated brand identity and app icon.
-- Interactive cooking mode.
-
-Implemented:
-
-- **Brand Identity & Iconography (Concept A)**: Production-ready vector app icon (`ic_launcher.xml`), background (`ic_launcher_background.xml`), foreground (`ic_launcher_foreground.xml`), and adaptive icon configurations (`ic_launcher_round.xml`).
-- **Culinary Design System**: Material 3 tokens (`DeepBasil`, `WarmSaffron`, `GoldenHoney`, `ToastedSesame`, `CharcoalSlate`, `HerbMuted`) configured in `res/values/colors.xml`, `styles.xml`, and Compose `Theme.kt`.
-- **Interactive Kitchen Cooking Mode (`CookingModeDialog.kt`)**: Hands-free fullscreen step walkthrough with screen WakeLock (`FLAG_KEEP_SCREEN_ON`), large typography, built-in kitchen countdown timer with +1m/+5m presets, ingredients peek drawer, and 1-tap "Finish & Mark Cooked".
-- **Dynamic Serving Scaler (`ServingScaler.kt`)**: 1x, 2x, 4x multiplier recalculation of ingredient measurements and checkable ingredient list with strikethrough styling.
-- **Cookbook Discovery Pills (`CategoryFilterRow.kt`)**: Filter chips for `All`, `Favorites`, `Quick (<20m)`, `High Protein`, `Vegetarian`, and `Cooked`.
-- **Modern Recipe Cards (`RecipeCard.kt`)**: Elevated 20dp cards with cook time, ingredients count, 1-tap Favorite/Cooked toggles, and direct "Cook" action button.
-- **Loading & Empty States**: Real-time resolution/extraction banners, dismissible error banners, and expressive culinary empty states.
-- Demo recipe seed.
-
-## Key Constraints
-
-- Instagram sharing provides a link via Android share sheet, which InstaRecipe resolves to MP4 via public Cobalt instances.
-- Directly shared video files (`video/*`) from device are supported natively.
-- Gemini Multimodal AI extracts structured details without user needing to re-type.
-- Recipe data remains on the device by default.
-
-## Next Action
-
-Replace temporary local persistence with Room database:
-
-- Room entity definitions (`RecipeEntity`).
-- DAO operations (insert, update, delete, search).
-- Database migration from SharedPreferences.
+Last verified: 2026-09-15
+
+## Status
+
+The security, data-integrity, networking, dependency, release-build, Gemini-model, and screen-structure upgrades in this work package are implemented and pass the local automated gates listed below. The screen-extraction, generated-ID, lifecycle-safe local-video, and typed-Gemini-transport follow-ups are **Reviewed** and **Verified**; the wider work package remains **Draft** until it receives an independent whole-package review. No app signing, publishing, deployment, or production mutation was performed.
+
+## Upgrade inventory
+
+| Area | Implemented state |
+| --- | --- |
+| Gemini | The only active model is `gemini-3.8-flash`. The first encrypted slot is the free primary key and the optional second slot is the paid fallback. Timeout, authentication/permission, quota, model-availability, and service-availability failures may use the paid key. Connection checks run concurrently with a 12-second deadline. Requests, generation responses, recipe payloads, Files API responses, and error envelopes use typed `kotlinx.serialization` DTOs. |
+| HTTP/coroutines | OkHttp calls suspend without blocking a dispatcher thread, cancel the underlying call, preserve `CancellationException`, use bounded same-model retries, and expose mapped errors rather than response bodies. Generation and large-file upload clients have separate bounded timeouts. Gemini owns its retry/fallback policy; WorkManager retries only non-Gemini resolver/network failures once. |
+| Gemini files | Videos use the Files API instead of inline Base64. Bounded best-effort remote deletion is attempted after success, failure, or coroutine cancellation in a non-cancellable cleanup block. |
+| Instagram privacy | Raw Instagram cookie/session access and the in-app WebView login flow were removed. There are no bundled community resolver endpoints. |
+| Resolver security | Custom resolvers must be HTTPS. Local, loopback, link-local, site-local, multicast, and IPv6 ULA destinations are rejected. Redirects are followed manually and revalidated on each hop. |
+| Video safety | Incoming shared videos must be `content://` URIs. Video MIME type, available storage, streaming size, and a 200 MB maximum are enforced; partial temporary files are deleted. |
+| Share intents | Externally shared text/video requires user confirmation before network or AI processing. Accepted Reel links enqueue unique, network-constrained WorkManager extraction. A processing draft is created or reclaimed, successful extraction replaces it and enters the Saved cookbook, and a failed draft can be re-shared to retry. Accepted video shares transfer synchronously to ViewModel ownership before the intent is cleared. Accepted intents are cleared to prevent replay, and text imports require a valid HTTPS Instagram URL. |
+| Room | Database v2 uses generated IDs, an explicit v1-to-v2 migration, a unique nullable normalized source URL, conflict-safe inserts, update-by-ID, exported schemas, and a migration instrumentation test. |
+| Architecture | `Recipe` models were extracted, storage is behind `RecipeStore`, and the ViewModel receives its repository through a factory instead of fetching a singleton internally. `MainActivity` now owns lifecycle/share orchestration while main, detail, and editor UI live in dedicated screen files. Gallery/shared-video extraction and its progress/error/completion state are owned by the ViewModel, survive Activity recreation, suppress duplicate starts, and retain the persisted result until UI acknowledgement. Persisted recipes propagate their generated Room IDs before editor/detail state is updated. Important recipe/cooking UI state is saveable. |
+| Secrets | Primary and optional backup Gemini keys use Android Keystore-backed encryption and are committed atomically. Plaintext legacy data is removed only after an encrypted round-trip succeeds, and settings report persistence failures. No committed key/session patterns were found in the closing scan. |
+| Accessibility/UX | Ingredient rows expose one checkbox role with stable checklist identity. Recipe cards open directly instead of flipping. Search is integrated into Cookbook, Add recipe presents video/manual choices, navigation has three destinations, and infrastructure controls are collapsed under Advanced settings. Serving scaling handles decimals, mixed fractions, Unicode fractions, and ranges. Timer formatting observes configuration locale changes. |
+| Release | Release shrinking, resource shrinking, and R8 obfuscation are enabled. Backup and cleartext traffic remain disabled. The release output is unsigned. |
+| Toolchain | Gradle 9.7.1, AGP 9.4.0, Kotlin 2.4.20, KSP 2.3.12, compile/target API 37, Compose BOM 2026.09, Lifecycle 2.11, WorkManager 2.11.2, Room 2.8.5, OkHttp 5.5, coroutines 1.11, and kotlinx.serialization 1.11. |
+| Supply chain | Versions are centralized in `gradle/libs.versions.toml`; dependency locks, SHA-256 verification metadata, and the official Gradle 9.7.1 distribution and wrapper-JAR checksums are committed. CI validates the wrapper and runs tests/lint/debug/release builds; Dependabot covers Gradle and Actions. |
+
+## Original implementation plan comparison
+
+| Planned item | Result | Difference / rationale |
+| --- | --- | --- |
+| Extract `MainScreen.kt`, `RecipeEditorScreen.kt`, and `RecipeDetailScreen.kt` from `MainActivity.kt` | **Implemented** | The scaffold/library/inbox/settings, detail, and editor composables now live in dedicated `ui/screens` files. `MainActivity.kt` is about 670 lines and retains lifecycle, share-intent, root-state, and root-composition responsibilities. |
+| Reduce OkHttp timeouts | **Implemented with adjustment** | Generation is bounded at 75 seconds total, key diagnostics at 12 seconds, and file upload at 5 minutes because videos cannot reliably use a blanket short limit. With two keys configured, each key receives one generation attempt so the paid fallback is not delayed by repeated free-key attempts. |
+| Preserve coroutine cancellation | **Implemented** | Network helpers, resolver/worker paths, and UI extraction launches explicitly rethrow cancellation. Best-effort remote cleanup intentionally runs non-cancellably. |
+| Replace manual `org.json` parsing with `kotlinx.serialization` | **Implemented** | Gemini request/response, recipe, file-upload/status, and error envelopes are typed. The API transport is injectable and covered by MockWebServer fixtures for success, malformed JSON, safe HTTP mapping, retry, cancellation, upload/polling, and remote cleanup. |
+| Add Gradle version catalog | **Implemented** | Plugins and libraries are referenced through `libs.versions.toml`. |
+| Upgrade outdated dependencies | **Implemented** | Current stable versions listed above were selected as of the verification date and compiled together. |
+| Add dependency injection | **Implemented without framework** | Constructor/factory injection removes the ViewModel singleton lookup. Hilt/Koin was not added because the app currently has one repository graph and does not need framework overhead. |
+| Build/test/lint verification | **Implemented** | See exact evidence below. |
+| Manual device verification | **Pending** | No connected emulator/device was available, so share-sheet flows, live Instagram/Gemini behavior, process recreation, dark/large-font screenshots, and the Room migration test were not executed on Android. |
+
+## Remaining known gaps
+
+1. Run the Room migration and Compose accessibility instrumentation suites on API 26 and API 37 devices/emulators, then manually exercise text/video shares and live Gemini 3.8 extraction.
+2. Move remaining user-facing hard-coded strings into resources and run pseudolocale, RTL, TalkBack, and 200% font-scale visual checks.
+3. Review the 30 non-blocking lint warnings (primarily unused legacy color resources, KTX suggestions, and storage-allocation guidance). Lint has zero errors.
+4. Run a dedicated dependency vulnerability scanner in CI or locally. OSV-Scanner, Trivy, and Grype were not installed on this machine; locks/checksums and Dependabot improve supply-chain control but are not a CVE scan.
+5. Obtain an independent whole-package code/security review. Automated checks and slice reviews do not satisfy the remaining whole-package governance requirement.
+
+## Verification evidence
+
+Executed locally on 2026-09-14 with the checksum-verified Gradle 9.7.1 distribution, JDK 17, Android Platform 37, and Build Tools 37.0.0:
+
+```powershell
+gradle.bat testDebugUnitTest :app:compileDebugAndroidTestKotlin lintDebug assembleDebug assembleRelease
+gradle.bat :app:dependencies --write-locks
+```
+
+Results:
+
+- 13 unit tests passed; 0 failures, 0 errors, 0 skipped.
+- Android instrumentation sources compiled, including the Room v1-to-v2 migration and recipe-card accessibility tests.
+- Lint passed with 0 errors and 30 warnings.
+- Debug APK built successfully.
+- Minified/resource-shrunk unsigned release APK built successfully; R8 mapping output was generated.
+- `git diff --check` passed.
+- Active source/docs scan found no Gemini 1.x/2.x model IDs, model-picker constants, Instagram session manager references, WebView/cookie code, blocking OkHttp `execute()` calls, private-key markers, Gemini-key-shaped literals, or `sessionid=` literals. One historical changelog sentence may describe older behavior explicitly as historical.
+
+Artifacts and reports are under `app/build/` and are intentionally not committed. The release APK is not installable as a production release until the owner separately authorizes and supplies signing/release configuration.
+
+## Follow-up verification: screen extraction and generated IDs
+
+Executed locally on 2026-09-14:
+
+```powershell
+.\gradlew.bat wrapper --gradle-version 9.7.1 --distribution-type bin
+.\gradlew.bat testDebugUnitTest :app:compileDebugAndroidTestKotlin lintDebug
+git diff --check
+```
+
+Results:
+
+- The Gradle 9.7.1 wrapper distribution and bootstrap JAR match Gradle's published SHA-256 checksums.
+- 14 unit tests passed, including a regression test proving generated recipe IDs and normalized tags are propagated after persistence.
+- Android instrumentation sources compiled.
+- Lint passed with 0 errors and 30 warnings.
+- `git diff --check` passed.
+- An independent reviewer confirmed the generated-ID blocker was resolved and recorded no remaining blocking findings in this follow-up slice. The regression test uses a fake `RecipeStore`; full DAO-to-UI behavior remains covered only by compilation and manual-review evidence until device tests run.
+
+## Follow-up verification: lifecycle-safe local-video extraction
+
+Executed locally on 2026-09-14:
+
+```powershell
+.\gradlew.bat testDebugUnitTest :app:compileDebugAndroidTestKotlin lintDebug
+git diff --check
+```
+
+Results:
+
+- 17 unit tests passed, including completion retention/acknowledgement, duplicate-start suppression, and error-state regression tests for the ViewModel-owned extraction controller.
+- Android instrumentation sources compiled.
+- Lint passed with 0 errors and 30 warnings.
+- `git diff --check` passed.
+- An independent reviewer recorded no blocking findings for Activity recreation ownership, synchronous accepted-video handoff, cancellation propagation, non-cancellable cleanup, off-main file copying, state delivery, or generated Room identity.
+- Device-level Activity recreation, cancellation/cleanup, provider-specific URI behavior, and live Gemini upload remain pending because no emulator/device or live credentials were used. Providers that return a missing or generic MIME type may still be rejected by the existing strict video validation.
+
+
+## Follow-up verification: typed Gemini transport
+
+Executed locally on 2026-09-14:
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest --write-locks --write-verification-metadata sha256
+.\gradlew.bat :app:compileDebugAndroidTestKotlin :app:lintDebug
+git diff --check
+```
+
+Results:
+
+- `org.json` was removed from the Gemini extraction path and replaced with typed kotlinx.serialization 1.11 DTOs for generation, recipe, error, upload, and status payloads.
+- 26 unit tests passed. Nine MockWebServer tests cover typed success payloads, malformed JSON, safe HTTP error mapping without upstream-message leakage, retry, text and post-upload cancellation, video upload/polling/use/deletion, missing-upload-URI cleanup, and cleanup after a malformed generation response.
+- Android instrumentation sources compiled.
+- Lint passed with 0 errors and 30 warnings.
+- Dependency locks and SHA-256 verification metadata include the new serialization plugin/runtime artifacts.
+- `git diff --check` passed.
+- An independent reviewer found two cleanup/cancellation edge cases; both were repaired and covered by regression fixtures. The reviewer then recorded no blocking findings. This follow-up is **Reviewed**, **Verified**, and **Accepted**. Live Gemini and device behavior remain pending and were not inferred from JVM fixtures.
+
+## Follow-up verification: background Reel completion and backup Gemini key
+
+Executed locally on 2026-09-14:
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest
+.\gradlew.bat :app:compileDebugAndroidTestKotlin :app:lintDebug
+git diff --check
+```
+
+Results:
+
+- Accepted text shares enqueue unique, network-constrained WorkManager extraction after URL validation and confirmation.
+- Successful background extraction now replaces the processing draft with a `Saved` recipe, so it leaves Inbox and appears in the cookbook.
+- Failed drafts can be reclaimed and queued again when the same link is re-shared; already-saved recipes remain deduplicated.
+- A primary and optional backup Gemini key are stored encrypted. Backup failover is limited to authentication/permission, quota, model-availability, and service-availability failures; invalid content and cancellation do not consume the backup key.
+- 33 unit tests passed, including five background-state/requeue tests and two key-fallback MockWebServer tests.
+- Android instrumentation sources compiled. Lint passed with zero errors; warning count is recorded after the final review run.
+- This follow-up is **Verified** and remains **Draft** pending independent review. Live Instagram/Gemini and device-level WorkManager behavior remain pending.
+
+## Follow-up verification: free-primary/paid-fallback and consumer shell
+
+Executed locally on 2026-09-15:
+
+```powershell
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug
+git diff --check
+```
+
+Results:
+
+- The first encrypted key is explicitly presented and used as the free primary; the second is the optional paid fallback.
+- Key diagnostics run concurrently with a 12-second deadline. Generation and Files API timeouts, authentication/permission rejection, quota exhaustion, model unavailability, and Gemini service failures can hand off to the paid key.
+- When two keys are configured, each gets one generation attempt. Gemini failures do not receive an additional WorkManager retry; non-Gemini resolver/network failures retain one background retry.
+- Cookbook search is integrated into the primary screen, bottom navigation is reduced to Cookbook/Imports/Settings, Add recipe uses a focused choice sheet, recipe-card taps open details directly, and technical controls are collapsed under Advanced settings.
+- 35 JVM unit tests passed with zero failures, including generation-timeout and video-upload-timeout free-to-paid fallback regressions.
+- Lint passed with zero errors. The debug APK assembled successfully.
+- `git diff --check` passed; line-ending notices for the pre-existing mixed working tree remain non-blocking.
+- An independent reviewer found two blocking retry/fallback gaps. Both were repaired and re-reviewed with no blocking findings. This bounded follow-up is **Reviewed**, **Verified**, and **Accepted**.
+- Live-key, device, share-sheet, and visual screenshot verification remain pending because no emulator/device or production credentials were used.

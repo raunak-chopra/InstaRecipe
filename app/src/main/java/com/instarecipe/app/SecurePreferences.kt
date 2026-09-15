@@ -14,19 +14,35 @@ object SecurePreferences {
     private const val AndroidKeyStore = "AndroidKeyStore"
     private const val KeyAlias = "instarecipe_local_secrets_v1"
     private const val Preferences = "instarecipe_secure_values"
-    private const val GeminiKey = "gemini_api_key_encrypted"
+    private const val GeminiPrimaryKey = "gemini_api_key_encrypted"
+    private const val GeminiBackupKey = "gemini_backup_api_key_encrypted"
 
-    fun getGeminiApiKey(context: Context): String {
+    fun getGeminiApiKey(context: Context): String = getEncryptedValue(context, GeminiPrimaryKey)
+
+    fun getGeminiBackupApiKey(context: Context): String = getEncryptedValue(context, GeminiBackupKey)
+
+    fun setGeminiApiKey(context: Context, value: String): Boolean =
+        setGeminiApiKeys(context, value, getGeminiBackupApiKey(context))
+
+    fun setGeminiApiKeys(context: Context, primary: String, backup: String): Boolean = runCatching {
+        val editor = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE).edit()
+        editor.putEncryptedOrRemove(GeminiPrimaryKey, primary)
+        editor.putEncryptedOrRemove(GeminiBackupKey, backup)
+        editor.commit()
+    }.getOrDefault(false)
+
+    private fun getEncryptedValue(context: Context, key: String): String {
         val encoded = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE)
-            .getString(GeminiKey, null)
+            .getString(key, null)
             ?: return ""
         return runCatching { decrypt(encoded) }.getOrDefault("")
     }
 
-    fun setGeminiApiKey(context: Context, value: String) {
-        val editor = context.getSharedPreferences(Preferences, Context.MODE_PRIVATE).edit()
-        if (value.isBlank()) editor.remove(GeminiKey) else editor.putString(GeminiKey, encrypt(value.trim()))
-        editor.apply()
+    private fun android.content.SharedPreferences.Editor.putEncryptedOrRemove(
+        key: String,
+        value: String
+    ) {
+        if (value.isBlank()) remove(key) else putString(key, encrypt(value.trim()))
     }
 
     private fun encrypt(value: String): String {

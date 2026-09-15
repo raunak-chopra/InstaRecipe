@@ -6,49 +6,49 @@
 
     <!-- Warm Background Squircle -->
     <path
-        android:fillColor="#FAF8F5"
+        android:fillColor="#101311"
         android:pathData="M24,4h60c11.05,0 20,8.95 20,20v60c0,11.05 -8.95,20 -20,20h-60c-11.05,0 -20,-8.95 -20,-20v-60c0,-11.05 8.95,-20 20,-20z" />
 
     <!-- Subtle Inner Border -->
     <path
-        android:strokeColor="#E8E2D8"
+        android:strokeColor="#303631"
         android:strokeWidth="1.5"
         android:pathData="M24,4h60c11.05,0 20,8.95 20,20v60c0,11.05 -8.95,20 -20,20h-60c-11.05,0 -20,-8.95 -20,-20v-60c0,-11.05 8.95,-20 20,-20z" />
 
-    <!-- Chef Hat Puffs (Deep Basil #2D6A4F) -->
+    <!-- Chef Hat Puffs (Tomato Coral) -->
     <!-- Center Top Puff -->
     <path
-        android:fillColor="#2D6A4F"
+        android:fillColor="#FF806F"
         android:pathData="M54,18c-8.84,0 -16,7.16 -16,16c0,1.2 0.14,2.37 0.4,3.5c1.4,-0.32 2.85,-0.5 4.35,-0.5c7.85,0 14.53,4.8 17.25,11.6c2.72,-6.8 9.4,-11.6 17.25,-11.6c1.5,0 2.95,0.18 4.35,0.5c0.26,-1.13 0.4,-2.3 0.4,-3.5c0,-8.84 -7.16,-16 -16,-16c-4.42,0 -8.42,1.79 -11.31,4.69C56.42,19.79 52.42,18 54,18z" />
 
     <!-- Left Puff -->
     <path
-        android:fillColor="#2D6A4F"
+        android:fillColor="#FF806F"
         android:pathData="M38,28c-6.63,0 -12,5.37 -12,12c0,4.86 2.89,9.04 7.05,10.92c1.95,-1.82 4.56,-2.92 7.45,-2.92c1.18,0 2.32,0.19 3.39,0.53C40.67,39.38 38,34.02 38,28z" />
 
     <!-- Right Puff -->
     <path
-        android:fillColor="#2D6A4F"
+        android:fillColor="#FF806F"
         android:pathData="M70,28c0,6.02 -2.67,11.38 -5.89,20.53c1.07,-0.34 2.21,-0.53 3.39,-0.53c2.89,0 5.5,1.1 7.45,2.92C79.11,49.04 82,44.86 82,40c0,-6.63 -5.37,-12 -12,-12z" />
 
     <!-- Chef Hat Base Brim (Connecting to Reel) -->
     <path
-        android:fillColor="#23533E"
+        android:fillColor="#E96D5E"
         android:pathData="M33,48h42c2.2,0 4,1.8 4,4v2H29v-2C29,49.8 30.8,48 33,48z" />
 
-    <!-- Clapperboard Top Bar (Warm Saffron #E07A5F) -->
+    <!-- Clapperboard Top Bar (Apricot) -->
     <path
-        android:fillColor="#E07A5F"
+        android:fillColor="#FFB38A"
         android:pathData="M31,56h46c2.2,0 4,1.8 4,4v3H27v-3C27,57.8 28.8,56 31,56z" />
 
-    <!-- Clapper Diagonal Stripes (Cream #FAF8F5) -->
+    <!-- Clapper Diagonal Stripes (Warm White) -->
     <path
-        android:fillColor="#FAF8F5"
+        android:fillColor="#F7F4EF"
         android:pathData="M35,56l-3,7h4l3,-7zM45,56l-3,7h4l3,-7zM55,56l-3,7h4l3,-7zM65,56l-3,7h4l3,-7zM75,56l-3,7h4l3,-7z" />
 
-    <!-- Clapperboard Body (Warm Saffron #E07A5F with rounded bottom) -->
+    <!-- Clapperboard Body (Tomato Coral with rounded bottom) -->
     <path
-        android:fillColor="#E07A5F"
+        android:fillColor="#FF806F"
         android:pathData="M27,65h54v14c0,5.52 -4.48,10 -10,10h-34c-5.52,0 -10,-4.48 -10,-10v-14z" />
 
     <!-- Video Play Button Glyph (Cream/White #FFFFFF) -->
@@ -58,11 +58,11 @@
 
     <!-- Gemini AI Sparkle Star Right (Golden Honey #F4A261) -->
     <path
-        android:fillColor="#F4A261"
+        android:fillColor="#FFB38A"
         android:pathData="M86,40c0,3.5 2.5,6 6,6c-3.5,0 -6,2.5 -6,6c0,-3.5 -2.5,-6 -6,-6c3.5,0 6,-2.5 6,-6z" />
 
     <!-- Gemini AI Sparkle Star Left (Golden Honey #F4A261) -->
     <path
-        android:fillColor="#F4A261"
+        android:fillColor="#FFB38A"
         android:pathData="M22,46c0,2.5 1.8,4.2 4.2,4.2c-2.4,0 -4.2,1.7 -4.2,4.2c0,-2.5 -1.8,-4.2 -4.2,-4.2c2.4,0 4.2,-1.7 4.2,-4.2z" />
 </vector>

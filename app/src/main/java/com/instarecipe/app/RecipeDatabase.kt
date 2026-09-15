@@ -1,25 +1,35 @@
 package com.instarecipe.app
 
 import android.content.Context
+import android.database.sqlite.SQLiteConstraintException
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
+import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.Transaction
+import androidx.room.Update
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
 
-@Entity(tableName = "recipes", primaryKeys = ["id"])
+@Entity(
+    tableName = "recipes",
+    indices = [Index(value = ["normalizedSourceUrl"], unique = true)]
+)
 data class RecipeEntity(
-    val id: Long,
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val title: String,
     val sourceUrl: String,
-    val normalizedSourceUrl: String,
+    val normalizedSourceUrl: String?,
     val creator: String,
     val category: String,
     val tagsJson: String,
@@ -37,8 +47,11 @@ interface RecipeDao {
     @Query("SELECT * FROM recipes ORDER BY id DESC")
     fun observeAll(): Flow<List<RecipeEntity>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(recipe: RecipeEntity)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insert(recipe: RecipeEntity): Long
+
+    @Update
+    suspend fun update(recipe: RecipeEntity): Int
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(recipes: List<RecipeEntity>)
@@ -51,9 +64,26 @@ interface RecipeDao {
 
     @Query("SELECT * FROM recipes WHERE normalizedSourceUrl = :sourceUrl LIMIT 1")
     suspend fun findByNormalizedSourceUrl(sourceUrl: String): RecipeEntity?
+
+    @Query("SELECT * FROM recipes WHERE id = :id LIMIT 1")
+    suspend fun findById(id: Long): RecipeEntity?
+
+    @Transaction
+    suspend fun insertOrGetBySourceUrl(recipe: RecipeEntity): RecipeEntity {
+        val normalizedUrl = recipe.normalizedSourceUrl
+        if (normalizedUrl != null) {
+            findByNormalizedSourceUrl(normalizedUrl)?.let { return it }
+        }
+
+        return try {
+            recipe.copy(id = insert(recipe.copy(id = 0)))
+        } catch (constraint: SQLiteConstraintException) {
+            normalizedUrl?.let { findByNormalizedSourceUrl(it) } ?: throw constraint
+        }
+    }
 }
 
-@Database(entities = [RecipeEntity::class], version = 1, exportSchema = false)
+@Database(entities = [RecipeEntity::class], version = 2, exportSchema = true)
 abstract class InstaRecipeDatabase : RoomDatabase() {
     abstract fun recipeDao(): RecipeDao
 
@@ -65,23 +95,110 @@ abstract class InstaRecipeDatabase : RoomDatabase() {
                 context.applicationContext,
                 InstaRecipeDatabase::class.java,
                 "instarecipe.db"
-            ).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2)
+                .build()
+                .also { instance = it }
+        }
+
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `recipes_new` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `sourceUrl` TEXT NOT NULL,
+                        `normalizedSourceUrl` TEXT,
+                        `creator` TEXT NOT NULL,
+                        `category` TEXT NOT NULL,
+                        `tagsJson` TEXT NOT NULL,
+                        `ingredientsJson` TEXT NOT NULL,
+                        `stepsJson` TEXT NOT NULL,
+                        `notes` TEXT NOT NULL,
+                        `favorite` INTEGER NOT NULL,
+                        `cooked` INTEGER NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `savedDate` TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `recipes_new` (
+                        `id`, `title`, `sourceUrl`, `normalizedSourceUrl`, `creator`, `category`,
+                        `tagsJson`, `ingredientsJson`, `stepsJson`, `notes`, `favorite`, `cooked`,
+                        `status`, `savedDate`
+                    )
+                    SELECT
+                        `id`, `title`, `sourceUrl`, NULLIF(TRIM(`normalizedSourceUrl`), ''),
+                        `creator`, `category`, `tagsJson`, `ingredientsJson`, `stepsJson`, `notes`,
+                        `favorite`, `cooked`, `status`, `savedDate`
+                    FROM `recipes`
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    UPDATE `recipes_new`
+                    SET `normalizedSourceUrl` = NULL
+                    WHERE `normalizedSourceUrl` IS NOT NULL
+                      AND `id` NOT IN (
+                          SELECT MIN(`id`)
+                          FROM `recipes_new`
+                          WHERE `normalizedSourceUrl` IS NOT NULL
+                          GROUP BY `normalizedSourceUrl`
+                      )
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE `recipes`")
+                db.execSQL("ALTER TABLE `recipes_new` RENAME TO `recipes`")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_recipes_normalizedSourceUrl` " +
+                        "ON `recipes` (`normalizedSourceUrl`)"
+                )
+            }
         }
     }
 }
 
-class RecipeRepository private constructor(private val dao: RecipeDao) {
-    val recipes: Flow<List<Recipe>> = dao.observeAll().map { entities -> entities.map(RecipeEntity::toRecipe) }
+interface RecipeStore {
+    val recipes: Flow<List<Recipe>>
+    suspend fun upsert(recipe: Recipe): Recipe
+    suspend fun update(id: Long, transform: Recipe.() -> Recipe)
+    suspend fun delete(id: Long)
+    suspend fun findBySourceUrl(sourceUrl: String): Recipe?
+    suspend fun createOrGetBySourceUrl(recipe: Recipe): Recipe
+    suspend fun migrateLegacyPreferences(context: Context)
+}
 
-    suspend fun upsert(recipe: Recipe) = dao.upsert(recipe.toEntity())
-    suspend fun delete(id: Long) = dao.delete(id)
-    suspend fun findBySourceUrl(sourceUrl: String): Recipe? {
-        val normalized = InstagramResolver.extractInstagramUrl(sourceUrl).orEmpty()
-            .ifBlank { sourceUrl.trim() }
+class RecipeRepository private constructor(private val dao: RecipeDao) : RecipeStore {
+    override val recipes: Flow<List<Recipe>> = dao.observeAll().map { entities -> entities.map(RecipeEntity::toRecipe) }
+
+    override suspend fun upsert(recipe: Recipe): Recipe {
+        val entity = recipe.toEntity()
+        val persistedId = if (entity.id == 0L) {
+            dao.insert(entity)
+        } else if (dao.update(entity) > 0) {
+            entity.id
+        } else {
+            dao.insert(entity)
+        }
+        return recipe.copy(id = persistedId)
+    }
+
+    override suspend fun createOrGetBySourceUrl(recipe: Recipe): Recipe =
+        dao.insertOrGetBySourceUrl(recipe.toEntity()).toRecipe()
+
+    override suspend fun update(id: Long, transform: Recipe.() -> Recipe) {
+        dao.findById(id)?.toRecipe()?.let { upsert(it.transform()) }
+    }
+
+    override suspend fun delete(id: Long) = dao.delete(id)
+    override suspend fun findBySourceUrl(sourceUrl: String): Recipe? {
+        val normalized = normalizedSourceUrl(sourceUrl) ?: return null
         return dao.findByNormalizedSourceUrl(normalized)?.toRecipe()
     }
 
-    suspend fun migrateLegacyPreferences(context: Context) {
+    override suspend fun migrateLegacyPreferences(context: Context) {
         val migrationPrefs = context.getSharedPreferences("insta_recipe_migrations", Context.MODE_PRIVATE)
         if (migrationPrefs.getBoolean("room_v1_complete", false)) return
 
@@ -111,7 +228,7 @@ private fun Recipe.toEntity() = RecipeEntity(
     id = id,
     title = title,
     sourceUrl = sourceUrl,
-    normalizedSourceUrl = InstagramResolver.extractInstagramUrl(sourceUrl).orEmpty().ifBlank { sourceUrl.trim() },
+    normalizedSourceUrl = normalizedSourceUrl(sourceUrl),
     creator = creator,
     category = category,
     tagsJson = JSONArray(TagNormalizer.normalizeAll(tags)).toString(),
@@ -151,3 +268,8 @@ private fun jsonStrings(json: String): List<String> = runCatching {
     val array = JSONArray(json)
     List(array.length()) { array.optString(it) }.filter(String::isNotBlank)
 }.getOrDefault(emptyList())
+
+private fun normalizedSourceUrl(sourceUrl: String): String? =
+    InstagramResolver.extractInstagramUrl(sourceUrl)
+        ?.trim()
+        ?.takeIf(String::isNotBlank)

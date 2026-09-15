@@ -1,17 +1,15 @@
 package com.instarecipe.app
 
 import android.content.Context
-import android.util.Base64
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.decodeFromString
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -26,31 +24,56 @@ data class ExtractedRecipeData(
     val sourceUrl: String
 )
 
-object GeminiRecipeExtractor {
-    private data class UploadedFile(val name: String, val uri: String)
-    // Primary default model
-    const val MODEL_GEMINI_2_5_FLASH = "gemini-2.5-flash"
-    const val MODEL_GEMINI_2_0_FLASH = "gemini-2.0-flash"
-    const val MODEL_GEMINI_1_5_FLASH = "gemini-1.5-flash"
-    const val MODEL_GEMINI_3_1_FLASH_LITE = "gemini-3.1-flash-lite"
-    const val MODEL_GEMINI_3_8_FLASH = "gemini-3.8-flash"
+internal suspend fun <T> withGeminiKeyFallback(
+    apiKeys: List<String>,
+    onBackupKey: () -> Unit = {},
+    block: suspend (String) -> T
+): T {
+    require(apiKeys.isNotEmpty()) { "At least one Gemini API key is required." }
+    apiKeys.forEachIndexed { index, apiKey ->
+        try {
+            return block(apiKey)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: GeminiApiException) {
+            if (!failure.mayTryBackupKey || index == apiKeys.lastIndex) throw failure
+            onBackupKey()
+        }
+    }
+    error("Gemini key fallback exhausted unexpectedly.")
+}
 
-    val AVAILABLE_MODELS = listOf(
-        MODEL_GEMINI_2_5_FLASH,
-        MODEL_GEMINI_3_8_FLASH
-    )
+object GeminiRecipeExtractor {
+    const val GEMINI_MODEL = "gemini-3.8-flash"
 
     // Configurable keys in SharedPreferences
     const val PREFS_SETTINGS = "insta_recipe_settings"
     const val KEY_API_KEY = "gemini_api_key"
-    const val KEY_SELECTED_MODEL = "gemini_selected_model"
     const val KEY_CUSTOM_RESOLVER = "custom_resolver_url"
+    private const val LEGACY_KEY_SELECTED_MODEL = "gemini_selected_model"
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(90, TimeUnit.SECONDS)
-        .writeTimeout(90, TimeUnit.SECONDS)
+    private val generationClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(70, TimeUnit.SECONDS)
+        .writeTimeout(45, TimeUnit.SECONDS)
+        .callTimeout(75, TimeUnit.SECONDS)
         .build()
+
+    private val connectionTestClient = generationClient.newBuilder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .writeTimeout(8, TimeUnit.SECONDS)
+        .callTimeout(12, TimeUnit.SECONDS)
+        .build()
+
+    private val fileClient = OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(90, TimeUnit.SECONDS)
+        .writeTimeout(3, TimeUnit.MINUTES)
+        .callTimeout(5, TimeUnit.MINUTES)
+        .build()
+    private val apiClient = GeminiApiClient(generationClient, fileClient)
+    private val connectionTestApiClient = GeminiApiClient(connectionTestClient, fileClient)
 
     fun getApiKey(context: Context): String {
         val secureValue = SecurePreferences.getGeminiApiKey(context)
@@ -58,30 +81,30 @@ object GeminiRecipeExtractor {
 
         // One-time migration from releases that stored the key as plaintext.
         val prefs = context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+        if (prefs.contains(LEGACY_KEY_SELECTED_MODEL)) {
+            prefs.edit().remove(LEGACY_KEY_SELECTED_MODEL).apply()
+        }
         val legacyValue = prefs.getString(KEY_API_KEY, null)?.trim().orEmpty()
         if (legacyValue.isNotBlank()) {
-            SecurePreferences.setGeminiApiKey(context, legacyValue)
-            prefs.edit().remove(KEY_API_KEY).apply()
+            val migrated = SecurePreferences.setGeminiApiKey(context, legacyValue) &&
+                SecurePreferences.getGeminiApiKey(context) == legacyValue
+            if (migrated) prefs.edit().remove(KEY_API_KEY).commit()
+            return legacyValue.takeIf { migrated }.orEmpty()
         }
-        return legacyValue
+        return ""
     }
 
-    fun setApiKey(context: Context, key: String) {
-        SecurePreferences.setGeminiApiKey(context, key)
-    }
+    fun getBackupApiKey(context: Context): String = SecurePreferences.getGeminiBackupApiKey(context)
 
-    fun getSelectedModel(context: Context): String {
-        val prefs = context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_SELECTED_MODEL, MODEL_GEMINI_2_5_FLASH)?.trim()
-            ?.takeIf { it.isNotBlank() } ?: MODEL_GEMINI_2_5_FLASH
-    }
+    fun getApiKeys(context: Context): List<String> = listOf(getApiKey(context), getBackupApiKey(context))
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
 
-    fun setSelectedModel(context: Context, model: String) {
-        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_SELECTED_MODEL, model.trim())
-            .apply()
-    }
+    fun setApiKey(context: Context, key: String): Boolean = SecurePreferences.setGeminiApiKey(context, key)
+
+    fun setApiKeys(context: Context, primary: String, backup: String): Boolean =
+        SecurePreferences.setGeminiApiKeys(context, primary, backup)
 
     fun getCustomResolver(context: Context): String {
         val prefs = context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
@@ -126,9 +149,9 @@ object GeminiRecipeExtractor {
         creatorName: String?,
         onStatus: (String) -> Unit = {}
     ): ExtractedRecipeData = withContext(Dispatchers.IO) {
-        val apiKey = getApiKey(context)
-        if (apiKey.isBlank()) {
-            throw IllegalStateException("Gemini API key is required. Please enter your free API key in Settings.")
+        val apiKeys = getApiKeys(context)
+        if (apiKeys.isEmpty()) {
+            throw IllegalStateException("A Gemini API key is required. Please enter a primary or backup key in Settings.")
         }
 
         val hasVideo = videoFile != null && videoFile.exists() && videoFile.length() > 0
@@ -143,168 +166,22 @@ object GeminiRecipeExtractor {
         }
 
         val prompt = buildPrompt(sourceUrl, creatorName, textCaption, hasVideo, hasCaption)
-        val partsArray = JSONArray()
-        var uploadedFileName: String? = null
-
-        if (hasVideo) {
-            val recipeVideo = requireNotNull(videoFile)
-            val fileSizeMb = recipeVideo.length() / (1024.0 * 1024.0)
-            if (fileSizeMb <= 16.0) {
-                onStatus("Uploading video directly to Gemini AI (${"%.1f".format(fileSizeMb)} MB)...")
-                val bytes = recipeVideo.readBytes()
-                val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
-
-                val inlineData = JSONObject().apply {
-                    put("mimeType", "video/mp4")
-                    put("data", base64Data)
-                }
-                partsArray.put(JSONObject().put("inlineData", inlineData))
-            } else {
-                onStatus("Uploading video (${"%.1f".format(fileSizeMb)} MB) via Gemini File API...")
-                val uploadedFile = uploadLargeVideo(apiKey, recipeVideo)
-                uploadedFileName = uploadedFile.name
-                val fileData = JSONObject().apply {
-                    put("mimeType", "video/mp4")
-                    put("fileUri", uploadedFile.uri)
-                }
-                partsArray.put(JSONObject().put("fileData", fileData))
-            }
-            onStatus("Gemini AI is watching video, listening to audio, and reading on-screen steps...")
-        } else {
-            onStatus("Gemini AI is reading caption and structuring ingredients & steps...")
+        if (!hasVideo) {
+            onStatus("Turning the caption into ingredients and steps…")
         }
-
-        // Add prompt
-        partsArray.put(JSONObject().put("text", prompt))
-
-        val preferredModel = getSelectedModel(context)
-        val modelsToTry = listOfNotNull(
-            preferredModel,
-            MODEL_GEMINI_2_5_FLASH.takeUnless { it == preferredModel }
-        )
-
-        var responseText: String? = null
-        var lastErrorMessage = ""
-
-        for (model in modelsToTry) {
-            // Standard generateContent endpoint
-            val contentPayload = JSONObject().apply {
-                put("contents", JSONArray().put(JSONObject().put("parts", partsArray)))
-                put("generationConfig", JSONObject().apply {
-                    put("responseMimeType", "application/json")
-                    put("temperature", 0.2)
-                })
-            }
-
-            val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-                .addHeader("x-goog-api-key", apiKey)
-                .addHeader("Content-Type", "application/json")
-                .post(contentPayload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-
-            try {
-                client.newCall(request).execute().use { response ->
-                    val body = response.body?.string().orEmpty()
-                    if (response.isSuccessful) {
-                        responseText = body
-                    } else {
-                        lastErrorMessage = try {
-                            JSONObject(body).optJSONObject("error")?.optString("message") ?: body
-                        } catch (_: Exception) { body }
-                    }
-                }
-            } catch (e: Exception) {
-                lastErrorMessage = e.message ?: "Network error"
-            }
-
-            if (!responseText.isNullOrBlank()) break
+        val generatedRecipe = withGeminiKeyFallback(
+            apiKeys = apiKeys,
+            onBackupKey = { onStatus("Free key was unavailable. Trying the paid fallback…") }
+        ) { apiKey ->
+            apiClient.generateRecipe(
+                apiKey = apiKey,
+                prompt = prompt,
+                videoFile = videoFile.takeIf { hasVideo },
+                maxGenerationAttempts = if (apiKeys.size > 1) 1 else 2,
+                onStatus = onStatus
+            )
         }
-
-        uploadedFileName?.let { deleteUploadedFile(apiKey, it) }
-
-        if (responseText.isNullOrBlank()) {
-            throw RuntimeException("Gemini API Error: $lastErrorMessage")
-        }
-
-        parseGeminiResponse(responseText!!, sourceUrl, creatorName)
-    }
-
-    /**
-     * Uploads video file > 16MB via Gemini File API and returns the fileUri.
-     */
-    private suspend fun uploadLargeVideo(apiKey: String, videoFile: File): UploadedFile {
-        val startUrl = "https://generativelanguage.googleapis.com/upload/v1beta/files"
-        val metadata = JSONObject().apply {
-            put("file", JSONObject().put("displayName", videoFile.name))
-        }
-
-        val startRequest = Request.Builder()
-            .url(startUrl)
-            .addHeader("x-goog-api-key", apiKey)
-            .addHeader("X-Goog-Upload-Protocol", "resumable")
-            .addHeader("X-Goog-Upload-Command", "start")
-            .addHeader("X-Goog-Upload-Header-Content-Length", videoFile.length().toString())
-            .addHeader("X-Goog-Upload-Header-Content-Type", "video/mp4")
-            .addHeader("Content-Type", "application/json")
-            .post(metadata.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .build()
-
-        val uploadUrl = client.newCall(startRequest).execute().use { res ->
-            if (!res.isSuccessful) {
-                throw RuntimeException("Failed to initiate video upload: ${res.body?.string()}")
-            }
-            res.header("X-Goog-Upload-URL") ?: throw RuntimeException("Missing upload URL in Gemini response")
-        }
-
-        val uploadRequest = Request.Builder()
-            .url(uploadUrl)
-            .addHeader("X-Goog-Upload-Command", "upload, finalize")
-            .addHeader("X-Goog-Upload-Offset", "0")
-            .addHeader("Content-Length", videoFile.length().toString())
-            .post(videoFile.asRequestBody("video/mp4".toMediaType()))
-            .build()
-
-        val uploaded = client.newCall(uploadRequest).execute().use { res ->
-            val body = res.body?.string().orEmpty()
-            if (!res.isSuccessful) {
-                throw RuntimeException("Failed to upload video content: $body")
-            }
-            val json = JSONObject(body)
-            val file = json.getJSONObject("file")
-            UploadedFile(file.getString("name"), file.getString("uri"))
-        }
-        return waitUntilFileIsActive(apiKey, uploaded)
-    }
-
-    private suspend fun waitUntilFileIsActive(apiKey: String, uploaded: UploadedFile): UploadedFile {
-        repeat(90) {
-            val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/${uploaded.name}")
-                .addHeader("x-goog-api-key", apiKey)
-                .build()
-            val state = client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw RuntimeException("Could not check uploaded video status.")
-                JSONObject(response.body?.string().orEmpty()).optString("state")
-            }
-            when (state) {
-                "ACTIVE" -> return uploaded
-                "FAILED" -> throw RuntimeException("Gemini could not process this video.")
-            }
-            delay(1_000)
-        }
-        throw RuntimeException("Video processing timed out. Please try a shorter video.")
-    }
-
-    private fun deleteUploadedFile(apiKey: String, name: String) {
-        runCatching {
-            val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/$name")
-                .addHeader("x-goog-api-key", apiKey)
-                .delete()
-                .build()
-            client.newCall(request).execute().close()
-        }
+        parseRecipePayload(generatedRecipe, sourceUrl, creatorName)
     }
 
     private fun buildPrompt(
@@ -359,77 +236,41 @@ object GeminiRecipeExtractor {
         }
     }
 
-    private fun parseGeminiResponse(
-        rawResponse: String,
+    private fun parseRecipePayload(
+        rawRecipe: String,
         sourceUrl: String,
         fallbackCreator: String?
     ): ExtractedRecipeData {
-        val root = JSONObject(rawResponse)
-        val textJson = when {
-            root.has("candidates") -> {
-                val candidates = root.getJSONArray("candidates")
-                if (candidates.length() > 0) {
-                    val candidate = candidates.getJSONObject(0)
-                    val content = candidate.optJSONObject("content")
-                    val parts = content?.optJSONArray("parts")
-                    if (parts != null && parts.length() > 0) {
-                        parts.getJSONObject(0).optString("text")
-                    } else ""
-                } else ""
-            }
-            root.has("output_text") -> root.getString("output_text")
-            root.has("output") -> {
-                val outputArr = root.getJSONArray("output")
-                if (outputArr.length() > 0) {
-                    val first = outputArr.getJSONObject(0)
-                    first.optString("text").ifBlank { first.optString("content") }
-                } else ""
-            }
-            else -> throw RuntimeException("Gemini returned unexpected response format: $rawResponse")
-        }
-
-        // Clean any markdown code fences if model wrapped response
-        val cleanJson = textJson.trim()
+        val cleanJson = rawRecipe.trim()
             .removePrefix("```json")
             .removePrefix("```")
             .removeSuffix("```")
             .trim()
+        val recipe = try {
+            GeminiJson.decodeFromString<RecipePayloadDto>(cleanJson)
+        } catch (_: SerializationException) {
+            throw RuntimeException("Gemini returned malformed recipe JSON.")
+        }
 
-        val recipeJson = JSONObject(cleanJson)
-
-        val title = recipeJson.optString("title", "Instagram Recipe").ifBlank { "Instagram Recipe" }
-        val creator = recipeJson.optString("creator", fallbackCreator.orEmpty()).ifBlank { fallbackCreator.orEmpty() }
-        val category = recipeJson.optString("category", "Saved to try").ifBlank { "Saved to try" }
-
-        val tagsList = recipeJson.optJSONArray("tags")?.let { arr ->
-            List(arr.length()) { arr.optString(it) }.filter { it.isNotBlank() }
-        } ?: listOf("Instagram")
-
-        val ingredientsList = recipeJson.optJSONArray("ingredients")?.let { arr ->
-            List(arr.length()) { arr.optString(it) }.filter { it.isNotBlank() }
-        } ?: emptyList()
-
-        val stepsList = recipeJson.optJSONArray("steps")?.let { arr ->
-            List(arr.length()) { arr.optString(it) }.filter { it.isNotBlank() }
-        } ?: emptyList()
-
-        val prep = recipeJson.optString("prepTime")
-        val cook = recipeJson.optString("cookTime")
-        val rawNotes = recipeJson.optString("notes")
-
+        val title = recipe.title.orEmpty().ifBlank { "Instagram Recipe" }
+        val creator = recipe.creator.orEmpty().ifBlank { fallbackCreator.orEmpty() }
+        val category = recipe.category.orEmpty().ifBlank { "Saved to try" }
+        val tags = recipe.tags?.filter { it.isNotBlank() } ?: listOf("Instagram")
+        val ingredients = recipe.ingredients?.filter { it.isNotBlank() }.orEmpty()
+        val steps = recipe.steps?.filter { it.isNotBlank() }.orEmpty()
         val combinedNotes = buildString {
-            if (prep.isNotBlank()) append("Prep Time: $prep\n")
-            if (cook.isNotBlank()) append("Cook Time: $cook\n")
-            if (rawNotes.isNotBlank()) append(rawNotes)
+            recipe.prepTime?.takeIf { it.isNotBlank() }?.let { append("Prep Time: $it\n") }
+            recipe.cookTime?.takeIf { it.isNotBlank() }?.let { append("Cook Time: $it\n") }
+            recipe.notes?.takeIf { it.isNotBlank() }?.let(::append)
         }.trim()
 
         return ExtractedRecipeData(
             title = title,
             creator = creator,
             category = category,
-            tags = TagNormalizer.normalizeAll(tagsList),
-            ingredients = ingredientsList,
-            steps = stepsList,
+            tags = TagNormalizer.normalizeAll(tags),
+            ingredients = ingredients,
+            steps = steps,
             notes = combinedNotes,
             sourceUrl = sourceUrl
         )
@@ -438,29 +279,45 @@ object GeminiRecipeExtractor {
     /**
      * Quick test to verify if the API key and model are active.
      */
-    suspend fun testConnection(apiKey: String, model: String = MODEL_GEMINI_2_5_FLASH): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun testConnections(primary: String, backup: String): Result<String> = withContext(Dispatchers.IO) {
+        val keyedChecks = listOf(
+            "Free key" to primary.trim(),
+            "Paid fallback" to backup.trim()
+        ).filter { (_, key) -> key.isNotBlank() }.distinctBy { (_, key) -> key }
+        if (keyedChecks.isEmpty()) return@withContext Result.failure(IllegalArgumentException("Enter at least one API key."))
         try {
-            val legacyPayload = JSONObject().apply {
-                put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", "Respond with 'OK'")))))
+            val results = supervisorScope {
+                keyedChecks.map { (label, key) ->
+                    async { label to runCatching { connectionTestApiClient.testConnection(key) } }
+                }.awaitAll()
             }
-            val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-                .addHeader("x-goog-api-key", apiKey)
-                .addHeader("Content-Type", "application/json")
-                .post(legacyPayload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-
-            client.newCall(request).execute().use { res ->
-                val body = res.body?.string().orEmpty()
-                if (res.isSuccessful) {
-                    Result.success("Connected successfully to $model!")
-                } else {
-                    val err = runCatching { JSONObject(body).optJSONObject("error")?.optString("message") }.getOrNull() ?: body
-                    Result.failure(Exception("Gemini error ($res.code): $err"))
+            val connected = results.filter { (_, result) -> result.isSuccess }.map { it.first }
+            val failed = results.filter { (_, result) -> result.isFailure }
+            val message = buildString {
+                if (connected.isNotEmpty()) append(connected.joinToString(" and ")).append(" ready.")
+                if (failed.isNotEmpty()) {
+                    if (isNotEmpty()) append(' ')
+                    append(failed.joinToString(" ") { (label, result) ->
+                        "$label: ${result.exceptionOrNull()?.message ?: "connection failed"}"
+                    })
                 }
             }
-        } catch (e: Exception) {
-            Result.failure(e)
+            if (connected.isNotEmpty()) Result.success(message) else Result.failure(IllegalStateException(message))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Result.failure(error)
+        }
+    }
+
+    suspend fun testConnection(apiKey: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            connectionTestApiClient.testConnection(apiKey)
+            Result.success("Key connected successfully.")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Result.failure(error)
         }
     }
 }

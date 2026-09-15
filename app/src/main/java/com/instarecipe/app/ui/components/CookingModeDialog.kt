@@ -55,11 +55,13 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -80,7 +82,6 @@ import com.instarecipe.app.ui.theme.AppMotion
 import com.instarecipe.app.ui.theme.LocalRecipeTypeScale
 import com.instarecipe.app.ui.theme.LocalReducedMotion
 import kotlinx.coroutines.delay
-import java.util.Locale
 
 @Composable
 fun CookingModeDialog(
@@ -101,8 +102,8 @@ fun CookingModeDialog(
         }
     }
 
-    var currentStepIndex by remember { mutableIntStateOf(0) }
-    var showIngredientsSummary by remember { mutableStateOf(false) }
+    var currentStepIndex by rememberSaveable { mutableIntStateOf(0) }
+    var showIngredientsSummary by rememberSaveable { mutableStateOf(false) }
 
     val totalSteps = steps.size.coerceAtLeast(1)
     val progress = (currentStepIndex + 1).toFloat() / totalSteps.toFloat()
@@ -354,8 +355,9 @@ fun CookingModeDialog(
 /** Owns ticking state so one-second updates do not invalidate the full cooking dialog. */
 @Composable
 private fun KitchenTimer() {
-    var secondsRemaining by remember { mutableIntStateOf(0) }
-    var isRunning by remember { mutableStateOf(false) }
+    val locale = LocalConfiguration.current.locales[0]
+    var secondsRemaining by rememberSaveable { mutableIntStateOf(0) }
+    var isRunning by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(isRunning) {
         while (isRunning && secondsRemaining > 0) {
@@ -384,7 +386,7 @@ private fun KitchenTimer() {
                     tint = if (isRunning) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = String.format(Locale.getDefault(), "%02d:%02d", secondsRemaining / 60, secondsRemaining % 60),
+                    text = String.format(locale, "%02d:%02d", secondsRemaining / 60, secondsRemaining % 60),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = if (secondsRemaining > 0) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface

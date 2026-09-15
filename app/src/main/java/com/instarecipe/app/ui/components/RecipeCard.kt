@@ -1,8 +1,6 @@
 package com.instarecipe.app.ui.components
 
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -18,12 +16,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -36,10 +32,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -57,6 +50,7 @@ import com.instarecipe.app.ui.theme.AppMotion
 import com.instarecipe.app.ui.theme.AppSpacing
 import com.instarecipe.app.ui.theme.LocalRecipeTypeScale
 import com.instarecipe.app.ui.theme.LocalReducedMotion
+import com.instarecipe.app.ui.theme.SuccessSage
 
 private val CookTimePattern = Regex(
     """(?i)(?:cook|prep|total)?\s*time:?\s*(\d+\s*(?:mins?|minutes?|hours?|hrs?))"""
@@ -73,42 +67,20 @@ fun ModernRecipeCard(
     modifier: Modifier = Modifier,
     onTagClick: (String) -> Unit = {}
 ) {
-    var ingredientsShown by rememberSaveable(recipe.id) { mutableStateOf(false) }
-    val reducedMotion = LocalReducedMotion.current
     Card(
-        onClick = { ingredientsShown = !ingredientsShown },
+        onClick = onOpen,
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = AppElevation.resting),
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize(
-                animationSpec = if (reducedMotion) snap() else tween(
-                    durationMillis = AppMotion.content,
-                    easing = AppMotion.standardEasing
-                )
-            )
             .semantics {
                 role = Role.Button
-                contentDescription = if (ingredientsShown) {
-                    "${recipe.title}, ingredients shown. Tap to show recipe summary"
-                } else {
-                    "${recipe.title}. Tap to show main ingredients"
-                }
+                contentDescription = "${recipe.title}. Open recipe"
             }
     ) {
-        Crossfade(
-            targetState = ingredientsShown,
-            animationSpec = if (reducedMotion) snap() else tween(
-                durationMillis = AppMotion.content,
-                easing = AppMotion.standardEasing
-            ),
-            label = "ingredients peek"
-        ) { showIngredients ->
-            if (showIngredients) RecipeIngredientsPeek(recipe, onOpen)
-            else RecipeSummary(recipe, onOpen, onToggleFavorite, onToggleCooked, onStartCooking, onTagClick)
-        }
+        RecipeSummary(recipe, onToggleFavorite, onToggleCooked, onStartCooking, onTagClick)
     }
 }
 
@@ -116,7 +88,6 @@ fun ModernRecipeCard(
 @Composable
 private fun RecipeSummary(
     recipe: Recipe,
-    onOpen: () -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleCooked: () -> Unit,
     onStartCooking: () -> Unit,
@@ -130,7 +101,7 @@ private fun RecipeSummary(
         label = "favorite feedback"
     )
     val cookedTint by animateColorAsState(
-        targetValue = if (recipe.cooked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        targetValue = if (recipe.cooked) SuccessSage else MaterialTheme.colorScheme.outline,
         animationSpec = if (reducedMotion) snap() else tween(AppMotion.state),
         label = "cooked feedback"
     )
@@ -141,12 +112,16 @@ private fun RecipeSummary(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(shape = MaterialTheme.shapes.extraSmall, color = MaterialTheme.colorScheme.primaryContainer) {
+            val isSavedToTry = recipe.category.equals("Saved to try", ignoreCase = true)
+            Surface(
+                shape = MaterialTheme.shapes.extraSmall,
+                color = if (isSavedToTry) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant
+            ) {
                 Text(
                     recipe.category.ifBlank { "Recipe" }.uppercase(),
                     style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.7.sp),
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = if (isSavedToTry) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = AppSpacing.xs, vertical = AppSpacing.xxs)
                 )
             }
@@ -162,7 +137,7 @@ private fun RecipeSummary(
                     Icon(
                         if (recipe.favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         contentDescription = if (recipe.favorite) "Remove from favorites" else "Add to favorites",
-                        tint = if (recipe.favorite) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline,
+                        tint = if (recipe.favorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                         modifier = Modifier.scale(favoriteScale)
                     )
                 }
@@ -209,7 +184,7 @@ private fun RecipeSummary(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Tap for ingredients", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Tap to open recipe", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.xs)) {
                 if (recipe.steps.isNotEmpty()) {
                     Button(
@@ -222,52 +197,6 @@ private fun RecipeSummary(
                         Text("Cook")
                     }
                 }
-                Button(
-                    onClick = onOpen,
-                    shape = MaterialTheme.shapes.small,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-                ) {
-                    Text("View")
-                    Spacer(Modifier.width(4.dp))
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecipeIngredientsPeek(recipe: Recipe, onOpen: () -> Unit) {
-    val type = LocalRecipeTypeScale.current
-    Column(modifier = Modifier.padding(AppSpacing.md), verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AppSpacing.xs)) {
-            Icon(Icons.Default.Restaurant, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Text("Main ingredients", style = type.sectionTitle)
-        }
-        Text(recipe.title, style = type.metadata, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (recipe.ingredients.isEmpty()) {
-            Text("No ingredients have been added yet.", style = type.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else {
-            recipe.ingredients.take(6).forEach { ingredient ->
-                Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.xs), verticalAlignment = Alignment.Top) {
-                    Text("•", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    Text(ingredient, style = type.ingredient, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-            }
-            if (recipe.ingredients.size > 6) {
-                Text("+${recipe.ingredients.size - 6} more", style = type.metadata, color = MaterialTheme.colorScheme.primary)
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Tap to return", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Button(onClick = onOpen, shape = MaterialTheme.shapes.small) {
-                Text("View recipe")
-                Spacer(Modifier.width(6.dp))
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
             }
         }
     }

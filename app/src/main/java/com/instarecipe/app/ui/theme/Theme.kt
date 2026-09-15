@@ -25,35 +25,35 @@ import com.instarecipe.app.R
 enum class ThemeMode { System, Light, Dark }
 
 private val LightColorScheme = lightColorScheme(
-    primary = Basil600, onPrimary = Color.White,
-    primaryContainer = Basil100, onPrimaryContainer = Basil900,
-    secondary = Tomato500, onSecondary = Color.White,
-    secondaryContainer = Tomato100, onSecondaryContainer = Tomato900,
-    tertiary = Honey500, onTertiary = Ink900,
-    tertiaryContainer = Honey200, onTertiaryContainer = Ink900,
-    background = Cream50, onBackground = Ink900,
-    surface = Color.White, onSurface = Ink900,
-    surfaceVariant = Cream100, onSurfaceVariant = Ink700,
-    outline = Ink500, outlineVariant = Cream200,
+    primary = TomatoCoral, onPrimary = EspressoBlack,
+    primaryContainer = PaleCoral, onPrimaryContainer = WarmInk,
+    secondary = Apricot, onSecondary = EspressoBlack,
+    secondaryContainer = PaleApricot, onSecondaryContainer = WarmInk,
+    tertiary = SuccessSage, onTertiary = EspressoBlack,
+    tertiaryContainer = PaleSage, onTertiaryContainer = WarmInk,
+    background = WarmCanvas, onBackground = WarmInk,
+    surface = WarmSurface, onSurface = WarmInk,
+    surfaceVariant = WarmSurfaceVariant, onSurfaceVariant = WarmMuted,
+    outline = WarmMuted, outlineVariant = WarmBorder,
     error = Color(0xFFBA1A1A), onError = Color.White,
     errorContainer = Color(0xFFFFDAD6), onErrorContainer = Color(0xFF410002),
-    surfaceTint = Basil600
+    surfaceTint = TomatoCoral
 )
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Basil300, onPrimary = Color(0xFF003823),
-    primaryContainer = Basil900, onPrimaryContainer = Color(0xFFA9F2CA),
-    secondary = Tomato300, onSecondary = Color(0xFF521204),
-    secondaryContainer = Tomato900, onSecondaryContainer = Color(0xFFFFDBD1),
-    tertiary = Honey200, onTertiary = Color(0xFF422C00),
-    tertiaryContainer = Color(0xFF5F4100), onTertiaryContainer = Color(0xFFFFDEA1),
-    background = Night950, onBackground = NightText,
-    surface = Night900, onSurface = NightText,
-    surfaceVariant = Night800, onSurfaceVariant = NightMuted,
-    outline = Color(0xFF89958E), outlineVariant = Night700,
+    primary = TomatoCoral, onPrimary = EspressoBlack,
+    primaryContainer = CoralTintedSurface, onPrimaryContainer = Apricot,
+    secondary = Apricot, onSecondary = EspressoBlack,
+    secondaryContainer = ApricotTintedSurface, onSecondaryContainer = Apricot,
+    tertiary = SuccessSage, onTertiary = EspressoBlack,
+    tertiaryContainer = SageTintedSurface, onTertiaryContainer = SuccessSage,
+    background = EspressoBlack, onBackground = WarmWhite,
+    surface = WarmCharcoal, onSurface = WarmWhite,
+    surfaceVariant = NeutralChipSurface, onSurfaceVariant = MushroomGrey,
+    outline = Stone, outlineVariant = SoftCharcoal,
     error = Color(0xFFFFB4AB), onError = Color(0xFF690005),
     errorContainer = Color(0xFF93000A), onErrorContainer = Color(0xFFFFDAD6),
-    surfaceTint = Basil300
+    surfaceTint = TomatoCoral
 )
 
 val AppShapes = Shapes(

@@ -57,7 +57,6 @@ class RecipeCardAccessibilityTest {
         }
 
         composeRule.onNodeWithText(recipe.title).assertExists()
-        composeRule.onNodeWithContentDescription("${recipe.title}. Tap to show main ingredients").performClick()
-        composeRule.onNodeWithText(recipe.ingredients.first()).assertExists()
+        composeRule.onNodeWithContentDescription("${recipe.title}. Open recipe").performClick()
     }
 }

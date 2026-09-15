@@ -1,26 +1,26 @@
 <resources>
-    <!-- Brand Identity Design Tokens (Concept A) -->
-    <color name="insta_recipe_primary">#2D6A4F</color>
-    <color name="insta_recipe_primary_container">#D8F3DC</color>
-    <color name="insta_recipe_on_primary">#FFFFFF</color>
+    <!-- Warm charcoal + coral brand identity -->
+    <color name="insta_recipe_primary">#FF806F</color>
+    <color name="insta_recipe_primary_container">#3A2420</color>
+    <color name="insta_recipe_on_primary">#101311</color>
 
-    <color name="insta_recipe_secondary">#E07A5F</color>
-    <color name="insta_recipe_secondary_container">#FCEADE</color>
-    <color name="insta_recipe_on_secondary">#FFFFFF</color>
+    <color name="insta_recipe_secondary">#FFB38A</color>
+    <color name="insta_recipe_secondary_container">#3A2A21</color>
+    <color name="insta_recipe_on_secondary">#101311</color>
 
-    <color name="insta_recipe_tertiary">#F4A261</color>
-    <color name="insta_recipe_tertiary_container">#FFF3E0</color>
+    <color name="insta_recipe_tertiary">#82A98B</color>
+    <color name="insta_recipe_tertiary_container">#213329</color>
 
-    <color name="insta_recipe_background">#FAF8F5</color>
-    <color name="insta_recipe_surface">#FFFFFF</color>
-    <color name="insta_recipe_surface_variant">#F4F1EC</color>
-    <color name="insta_recipe_outline">#E5E0D8</color>
+    <color name="insta_recipe_background">#101311</color>
+    <color name="insta_recipe_surface">#191D1A</color>
+    <color name="insta_recipe_surface_variant">#232824</color>
+    <color name="insta_recipe_outline">#303631</color>
 
-    <color name="insta_recipe_charcoal">#1A201E</color>
-    <color name="insta_recipe_herb_muted">#5A6B63</color>
-    <color name="insta_recipe_success">#2E7D32</color>
+    <color name="insta_recipe_charcoal">#101311</color>
+    <color name="insta_recipe_herb_muted">#B8B7B1</color>
+    <color name="insta_recipe_success">#82A98B</color>
     <color name="insta_recipe_error">#C62828</color>
 
     <!-- Legacy seed alias for backward compatibility -->
-    <color name="insta_recipe_seed">#2D6A4F</color>
+    <color name="insta_recipe_seed">#FF806F</color>
 </resources>
