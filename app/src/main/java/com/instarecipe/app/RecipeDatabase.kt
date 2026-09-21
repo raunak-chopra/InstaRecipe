@@ -39,7 +39,14 @@ data class RecipeEntity(
     val favorite: Boolean,
     val cooked: Boolean,
     val status: String,
-    val savedDate: String
+    val savedDate: String,
+    val totalTimeMinutes: Int?,
+    val activeTimeMinutes: Int?,
+    val yield: String,
+    val skillLevel: String,
+    val cookPhotoPath: String,
+    val cookedAt: String?,
+    val dietType: String = DietType.Unknown.name
 )
 
 @Dao
@@ -81,9 +88,25 @@ interface RecipeDao {
             normalizedUrl?.let { findByNormalizedSourceUrl(it) } ?: throw constraint
         }
     }
+
+    @Transaction
+    suspend fun replaceInstagramRetryIfUnchanged(
+        id: Long,
+        expectedFingerprint: String,
+        replacement: RecipeEntity
+    ): Boolean {
+        val current = findById(id)?.toRecipe() ?: return false
+        if (!current.canExtractFromLinkAgain()) return false
+        if (replacement.status != RecipeStatus.Draft.name) return false
+        if (current.persistedFingerprint() != expectedFingerprint) return false
+        if (replacement.id != id || normalizedSourceUrl(replacement.sourceUrl) != normalizedSourceUrl(current.sourceUrl)) {
+            return false
+        }
+        return update(replacement) == 1
+    }
 }
 
-@Database(entities = [RecipeEntity::class], version = 2, exportSchema = true)
+@Database(entities = [RecipeEntity::class], version = 5, exportSchema = true)
 abstract class InstaRecipeDatabase : RoomDatabase() {
     abstract fun recipeDao(): RecipeDao
 
@@ -95,7 +118,7 @@ abstract class InstaRecipeDatabase : RoomDatabase() {
                 context.applicationContext,
                 InstaRecipeDatabase::class.java,
                 "instarecipe.db"
-            ).addMigrations(MIGRATION_1_2)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 .also { instance = it }
         }
@@ -157,6 +180,31 @@ abstract class InstaRecipeDatabase : RoomDatabase() {
                 )
             }
         }
+
+        /** Adds only optional, source-backed editorial recipe facts; existing recipes stay intact. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE recipes ADD COLUMN totalTimeMinutes INTEGER")
+                db.execSQL("ALTER TABLE recipes ADD COLUMN activeTimeMinutes INTEGER")
+                db.execSQL("ALTER TABLE recipes ADD COLUMN `yield` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE recipes ADD COLUMN skillLevel TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** Cook photos are private local files; pre-existing recipes have no photo or cook date. */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE recipes ADD COLUMN cookPhotoPath TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE recipes ADD COLUMN cookedAt TEXT")
+            }
+        }
+
+        /** Stores the explicit Veg/Non-veg classification used by cookbook filters. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE recipes ADD COLUMN dietType TEXT NOT NULL DEFAULT 'Unknown'")
+            }
+        }
     }
 }
 
@@ -165,8 +213,14 @@ interface RecipeStore {
     suspend fun upsert(recipe: Recipe): Recipe
     suspend fun update(id: Long, transform: Recipe.() -> Recipe)
     suspend fun delete(id: Long)
+    suspend fun findById(id: Long): Recipe?
     suspend fun findBySourceUrl(sourceUrl: String): Recipe?
     suspend fun createOrGetBySourceUrl(recipe: Recipe): Recipe
+    suspend fun completeInstagramRetry(
+        id: Long,
+        expectedFingerprint: String,
+        replacement: Recipe
+    ): Boolean
     suspend fun migrateLegacyPreferences(context: Context)
 }
 
@@ -193,10 +247,21 @@ class RecipeRepository private constructor(private val dao: RecipeDao) : RecipeS
     }
 
     override suspend fun delete(id: Long) = dao.delete(id)
+    override suspend fun findById(id: Long): Recipe? = dao.findById(id)?.toRecipe()
     override suspend fun findBySourceUrl(sourceUrl: String): Recipe? {
         val normalized = normalizedSourceUrl(sourceUrl) ?: return null
         return dao.findByNormalizedSourceUrl(normalized)?.toRecipe()
     }
+
+    override suspend fun completeInstagramRetry(
+        id: Long,
+        expectedFingerprint: String,
+        replacement: Recipe
+    ): Boolean = dao.replaceInstagramRetryIfUnchanged(
+        id = id,
+        expectedFingerprint = expectedFingerprint,
+        replacement = replacement.copy(id = id).toEntity()
+    )
 
     override suspend fun migrateLegacyPreferences(context: Context) {
         val migrationPrefs = context.getSharedPreferences("insta_recipe_migrations", Context.MODE_PRIVATE)
@@ -224,7 +289,7 @@ class RecipeRepository private constructor(private val dao: RecipeDao) : RecipeS
     }
 }
 
-private fun Recipe.toEntity() = RecipeEntity(
+internal fun Recipe.toEntity() = RecipeEntity(
     id = id,
     title = title,
     sourceUrl = sourceUrl,
@@ -238,14 +303,37 @@ private fun Recipe.toEntity() = RecipeEntity(
     favorite = favorite,
     cooked = cooked,
     status = status.name,
-    savedDate = savedDate
+    savedDate = savedDate,
+    totalTimeMinutes = totalTimeMinutes,
+    activeTimeMinutes = activeTimeMinutes,
+    yield = yield,
+    skillLevel = skillLevel,
+    cookPhotoPath = cookPhotoPath,
+    cookedAt = cookedAt,
+    dietType = dietType.name
 )
 
-private fun RecipeEntity.toRecipe() = Recipe(
-    id, title, sourceUrl, creator, category,
-    jsonStrings(tagsJson).let(TagNormalizer::normalizeAll),
-    jsonStrings(ingredientsJson), jsonStrings(stepsJson), notes, favorite, cooked,
-    runCatching { RecipeStatus.valueOf(status) }.getOrDefault(RecipeStatus.Draft), savedDate
+internal fun RecipeEntity.toRecipe() = Recipe(
+    id = id,
+    title = title,
+    sourceUrl = sourceUrl,
+    creator = creator,
+    category = category,
+    tags = jsonStrings(tagsJson).let(TagNormalizer::normalizeAll),
+    ingredients = jsonStrings(ingredientsJson),
+    steps = jsonStrings(stepsJson),
+    notes = notes,
+    favorite = favorite,
+    cooked = cooked,
+    status = runCatching { RecipeStatus.valueOf(status) }.getOrDefault(RecipeStatus.Draft),
+    savedDate = savedDate,
+    totalTimeMinutes = totalTimeMinutes,
+    activeTimeMinutes = activeTimeMinutes,
+    yield = yield,
+    skillLevel = skillLevel,
+    cookPhotoPath = cookPhotoPath,
+    cookedAt = cookedAt,
+    dietType = runCatching { DietType.valueOf(dietType) }.getOrDefault(DietType.Unknown)
 )
 
 private fun JSONObject.toLegacyRecipe() = Recipe(
@@ -253,7 +341,7 @@ private fun JSONObject.toLegacyRecipe() = Recipe(
     title = optString("title"),
     sourceUrl = optString("sourceUrl"),
     creator = optString("creator"),
-    category = optString("category", "Saved to try"),
+    category = optString("category", "Other"),
     tags = jsonStrings(optJSONArray("tags")?.toString().orEmpty()).let(TagNormalizer::normalizeAll),
     ingredients = jsonStrings(optJSONArray("ingredients")?.toString().orEmpty()),
     steps = jsonStrings(optJSONArray("steps")?.toString().orEmpty()),
@@ -269,7 +357,7 @@ private fun jsonStrings(json: String): List<String> = runCatching {
     List(array.length()) { array.optString(it) }.filter(String::isNotBlank)
 }.getOrDefault(emptyList())
 
-private fun normalizedSourceUrl(sourceUrl: String): String? =
+internal fun normalizedSourceUrl(sourceUrl: String): String? =
     InstagramResolver.extractInstagramUrl(sourceUrl)
         ?.trim()
         ?.takeIf(String::isNotBlank)

@@ -31,4 +31,15 @@ class RecipeSearchTest {
         assertTrue(isQuickRecipe(pasta))
         assertFalse(isQuickRecipe(pasta.copy(notes = "Cook time: 35 minutes")))
     }
+
+    @Test fun `home category recognizes meal and diet filters`() {
+        assertEquals("dinner", pasta.homeCategoryKey())
+        assertTrue(pasta.matchesHomeCategory("category:dinner"))
+        assertTrue(pasta.matchesHomeCategory("category:veg"))
+        assertFalse(pasta.matchesHomeCategory("category:breakfast"))
+    }
+
+    @Test fun `legacy category is displayed as other`() {
+        assertEquals("Other", pasta.copy(category = "Saved to try").displayCategory())
+    }
 }

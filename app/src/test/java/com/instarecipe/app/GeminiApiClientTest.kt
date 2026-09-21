@@ -59,6 +59,54 @@ class GeminiApiClientTest {
         assertTrue(body.contains("\"contents\""))
         assertTrue(body.contains("\"responseMimeType\":\"application/json\""))
         assertTrue(body.contains("\"text\":\"Extract this\""))
+        assertTrue(body.contains("\"thinkingLevel\":\"low\""))
+        assertTrue(body.contains("\"responseJsonSchema\""))
+        assertTrue(body.contains("\"required\":[\"title\",\"creator\",\"dietType\",\"category\""))
+    }
+
+    @Test
+    fun generationJoinsRecipeJsonSplitAcrossTextParts() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"candidates":[{"content":{"parts":[{"text":"{\"title\":"},{"text":"\"Split recipe\"}"}]}}]}"""
+            )
+        )
+
+        val recipe = client.generateRecipe("test-key", "Extract", null)
+
+        assertEquals("""{"title":"Split recipe"}""", recipe)
+    }
+
+    @Test
+    fun connectionCheckUsesFastModelCapabilityEndpoint() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"name":"models/gemini-3.8-flash","supportedGenerationMethods":["generateContent","countTokens"]}"""
+            )
+        )
+
+        client.testConnection("test-key")
+
+        val request = server.takeRequest()
+        assertEquals("GET", request.method)
+        assertEquals("/v1beta/models/gemini-3.8-flash", request.path)
+        assertEquals("test-key", request.getHeader("x-goog-api-key"))
+    }
+
+    @Test
+    fun connectionCheckRejectsModelWithoutGenerateContent() {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"name":"models/gemini-3.8-flash","supportedGenerationMethods":["countTokens"]}"""
+            )
+        )
+
+        val error = assertThrows(GeminiApiException::class.java) {
+            runBlocking { client.testConnection("test-key") }
+        }
+
+        assertEquals("Gemini 3.8 Flash is not enabled for recipe creation with this key.", error.message)
+        assertTrue(error.mayTryBackupKey)
     }
 
     @Test
@@ -84,7 +132,10 @@ class GeminiApiClientTest {
             runBlocking { client.generateRecipe("bad-key", "Extract", null) }
         }
 
-        assertEquals("Gemini rejected the API key. Check the key in Settings.", error.message)
+        assertEquals(
+            "Gemini rejected this key. Use a current Auth key from Google AI Studio.",
+            error.message
+        )
         assertFalse(error.message.orEmpty().contains("sensitive"))
         assertEquals(1, server.requestCount)
     }
@@ -121,6 +172,25 @@ class GeminiApiClientTest {
     }
 
     @Test
+    fun blockedLegacyKeyGetsActionableSafeError() {
+        server.enqueue(
+            MockResponse().setResponseCode(403).setBody(
+                """{"error":{"status":"PERMISSION_DENIED","message":"This unrestricted standard key is blocked"}}"""
+            )
+        )
+
+        val error = assertThrows(GeminiApiException::class.java) {
+            runBlocking { client.testConnection("legacy-key") }
+        }
+
+        assertEquals(
+            "Google blocked this Gemini key. Create a new Auth key in Google AI Studio.",
+            error.message
+        )
+        assertFalse(error.message.orEmpty().contains("unrestricted"))
+    }
+
+    @Test
     fun timedOutFreeKeyFallsBackToPaidKeyWithoutExtraFreeRetries() = runTest {
         val fastTimeoutClient = OkHttpClient.Builder()
             .callTimeout(150, TimeUnit.MILLISECONDS)
@@ -145,6 +215,20 @@ class GeminiApiClientTest {
 
         assertEquals("""{"title":"Paid Key Worked"}""", recipe)
         assertEquals(2, server.requestCount)
+        assertEquals("free-key", server.takeRequest().getHeader("x-goog-api-key"))
+        assertEquals("paid-key", server.takeRequest().getHeader("x-goog-api-key"))
+    }
+
+    @Test
+    fun httpTimeoutFromFreeKeyFallsBackToPaidKey() = runTest {
+        server.enqueue(MockResponse().setResponseCode(408).setBody("""{"error":{"status":"DEADLINE_EXCEEDED"}}"""))
+        server.enqueue(MockResponse().setBody(successResponse("""{"title":"Paid Key Worked"}""")))
+
+        val recipe = withGeminiKeyFallback(listOf("free-key", "paid-key")) { key ->
+            client.generateRecipe(key, "Extract", null, maxGenerationAttempts = 1)
+        }
+
+        assertEquals("""{"title":"Paid Key Worked"}""", recipe)
         assertEquals("free-key", server.takeRequest().getHeader("x-goog-api-key"))
         assertEquals("paid-key", server.takeRequest().getHeader("x-goog-api-key"))
     }

@@ -9,11 +9,23 @@
 
 ### Unreleased: Gemini 3.8, Security, Data Integrity & Toolchain
 
-- Defined the encrypted key order as free primary then paid fallback. Connection checks now run concurrently with a 12-second deadline, timeout and Files API failures can use the paid key, and Gemini failures are not retried again by WorkManager.
+- Added a fail-closed extraction quality gate: Gemini responses must contain a real title, at least one usable ingredient, and at least one usable cooking step. Placeholder/blank results stay in Imports with an actionable review message, legacy incomplete Saved rows are reclaimed there, and cookbook cards never render `Untitled Recipe` or empty recipe cards.
+- Added persisted Veg / Non-veg / Vegan classification with safe inference for older recipes, prominent Home filters, a visible diet selector in review, and a less crowded Home layout without the overlapping floating action button.
+- Restored review-first Reel extraction: successful imports and explicit link retries now remain populated Drafts in Imports, preserve captured source text and personal state, and open the review editor after an explicit retry; only Save recipe promotes them to the cookbook. URL variants and common Gemini response formatting are normalized before duplicate detection and recipe-card mapping.
+
+- Updated the v0.4.1 launcher, themed icon, and in-app brand mark to the supplied orange-red bowl with heart-shaped steam identity.
+- Introduced the **Cookbook Club** consumer redesign for v0.4.0: an editorial recipe library, vivid aubergine/tomato/lime palette, bolder asymmetric cards, a saved-Reel brand mark, clearer Recipes/Imports/You navigation, and task-first language that keeps AI terminology out of the cooking flow.
+- Added a first-use cookbook hero, prominent Reel-saving action, clearer import queue, consumer-oriented empty states, and a quieter recipe editor/details experience.
+- Added a one-tap **Import from link again** action directly to failed Instagram cards. Explicit retries replace the prior background job and reuse the original share text without carrying failure notices into recipe extraction.
+- Fixed primary-to-backup failover for HTTP 408/`DEADLINE_EXCEEDED` responses and disabled OkHttp's hidden transport replay so the primary key cannot be retried before the backup key gets its turn.
+- Bumped the debug application to version 0.3.2 (302) so updated installs can be distinguished from the older UI build.
+- Defined the encrypted key order as primary then backup Auth key. Connection checks now validate model capability concurrently with a 12-second deadline, timeout and Files API failures can use the backup key, and Gemini failures are not retried again by WorkManager.
 - Simplified the consumer shell to three destinations (Cookbook, Imports, Settings), moved search into Cookbook, added a unified Add recipe sheet, made recipe cards open directly, hid technical controls under Advanced settings, and replaced prominent AI/diagnostic copy with task-focused language.
 - Standardized all AI extraction and connection testing on `gemini-3.8-flash`; removed obsolete 2.x/1.x selection and fallback paths.
 - Replaced blocking OkHttp calls with coroutine-cancellable calls, bounded retries, separate generation/upload timeouts, safe user-facing failures, and bounded best-effort remote-file cleanup.
-- Removed Instagram cookie/session extraction and public community-resolver defaults. Only public Instagram metadata or an explicitly configured HTTPS resolver is used.
+- Public community-resolver defaults remain disabled; the resolver uses public metadata/configured HTTPS endpoints when unauthenticated and the opt-in app-private session for personal authenticated imports.
+- Restored public Reel metadata/video fallback with redirect handling, added optional public creator-profile context for configured resolvers, and kept private/session-only Instagram content out of scope.
+- Restored the opt-in authenticated Instagram WebView session for personal Reel imports, with app-private cookies and an explicit disconnect/clear-session action. This feature is persistent by owner instruction and must not be removed without explicit instruction.
 - Added HTTPS-only redirect validation, local/private-address rejection, video MIME checks, 200 MB limits, storage checks, and partial-file cleanup.
 - Added explicit confirmation before external shares trigger network/AI processing and made share intents one-shot after acceptance.
 - Migrated Room to generated primary keys with an explicit v1-to-v2 migration, unique normalized source URLs, conflict-safe updates, exported schemas, and a migration instrumentation test.

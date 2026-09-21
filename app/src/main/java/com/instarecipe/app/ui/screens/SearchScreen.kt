@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -29,6 +30,8 @@ import com.instarecipe.app.buildRecipeSearchIndex
 import com.instarecipe.app.searchRecipes
 import com.instarecipe.app.ui.components.ModernRecipeCard
 import kotlinx.coroutines.delay
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.instarecipe.app.ui.theme.AppRadii
 
 @Composable
 internal fun SearchTabScreen(
@@ -49,37 +52,44 @@ internal fun SearchTabScreen(
     val filtered = remember(debouncedQuery, searchIndex) { searchRecipes(searchIndex, debouncedQuery) }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().imePadding(),
         contentPadding = PaddingValues(start = 20.dp, top = 14.dp, end = 20.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item(contentType = "search-header") {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Pantry & Recipe Search", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text("Explore the shelf", style = MaterialTheme.typography.headlineMedium)
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Search by ingredient, dish name, or chef...") },
+                    label = { Text("Search recipes, ingredients, or creator") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                    shape = MaterialTheme.shapes.medium,
+                    shape = RoundedCornerShape(AppRadii.surface),
                     singleLine = true
                 )
+                if (query.isNotBlank()) {
+                    Text(
+                        "${filtered.size} ${if (filtered.size == 1) "recipe" else "recipes"} found",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
 
         if (query.isBlank()) {
             item(contentType = "empty") {
                 CulinaryEmptyState(
-                    title = "What's in your fridge?",
-                    message = "Type ingredients like 'paneer', 'garlic', 'quinoa', or dishes like 'pasta' to find recipes."
+                    title = "Start with what you have",
+                    message = "Search by ingredient, dish, or creator to find something worth cooking."
                 )
             }
         } else if (filtered.isEmpty()) {
             item(contentType = "empty") {
                 CulinaryEmptyState(
                     title = "No recipes found",
-                    message = "No recipes matched '$query'. Try another ingredient or save a new reel!"
+                    message = "No recipes matched '$query'. Try a broader term or save a new Reel."
                 )
             }
         } else {

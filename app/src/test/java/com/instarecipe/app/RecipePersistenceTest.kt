@@ -46,7 +46,13 @@ private class RecordingRecipeStore(private val generatedId: Long) : RecipeStore 
 
     override suspend fun update(id: Long, transform: Recipe.() -> Recipe) = Unit
     override suspend fun delete(id: Long) = Unit
+    override suspend fun findById(id: Long): Recipe? = null
     override suspend fun findBySourceUrl(sourceUrl: String): Recipe? = null
     override suspend fun createOrGetBySourceUrl(recipe: Recipe): Recipe = recipe.copy(id = generatedId)
+    override suspend fun completeInstagramRetry(
+        id: Long,
+        expectedFingerprint: String,
+        replacement: Recipe
+    ): Boolean = false
     override suspend fun migrateLegacyPreferences(context: Context) = Unit
 }

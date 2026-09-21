@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
@@ -22,7 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -73,6 +75,8 @@ import java.io.File
 import java.time.LocalDate
 import com.instarecipe.app.*
 
+private enum class ExtractedNotesPolicy { Replace, Append }
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun RecipeEditor(
@@ -84,17 +88,41 @@ internal fun RecipeEditor(
     var title by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.title.orEmpty()) }
     var sourceUrl by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.sourceUrl.orEmpty()) }
     var creator by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.creator.orEmpty()) }
-    var category by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.category ?: "Saved to try") }
+    var category by rememberSaveable(recipe?.id) {
+        mutableStateOf(recipe?.category?.takeUnless { it.equals("Saved to try", ignoreCase = true) }.orEmpty())
+    }
+    var dietType by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.dietType ?: DietType.Unknown) }
     var tags by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.tags.orEmpty()) }
     var tagDraft by rememberSaveable(recipe?.id) { mutableStateOf("") }
     var ingredients by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.ingredients?.joinToString("\n").orEmpty()) }
     var steps by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.steps?.joinToString("\n").orEmpty()) }
     var notes by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.notes.orEmpty()) }
+    var totalTimeMinutes by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.totalTimeMinutes?.toString().orEmpty()) }
+    var activeTimeMinutes by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.activeTimeMinutes?.toString().orEmpty()) }
+    var recipeYield by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.yield.orEmpty()) }
+    var skillLevel by rememberSaveable(recipe?.id) { mutableStateOf(recipe?.skillLevel.orEmpty()) }
 
     var isExtractingFromEditor by remember { mutableStateOf(false) }
     var editorFeedbackMessage by remember { mutableStateOf<String?>(null) }
     var showPasteCaptionDialog by remember { mutableStateOf(false) }
     var captionDialogInput by remember { mutableStateOf("") }
+
+    fun applyExtractedRecipe(extracted: ExtractedRecipeData, notesPolicy: ExtractedNotesPolicy) {
+        title = extracted.title
+        if (creator.isBlank() || creator.startsWith("http")) creator = extracted.creator
+        category = extracted.category
+        dietType = extracted.dietType
+        tags = TagNormalizer.normalizeAll(extracted.tags)
+        ingredients = extracted.ingredients.joinToString("\n")
+        steps = extracted.steps.joinToString("\n")
+        extracted.totalTimeMinutes?.let { totalTimeMinutes = it.toString() }
+        if (extracted.notes.isNotBlank()) {
+            notes = when (notesPolicy) {
+                ExtractedNotesPolicy.Replace -> extracted.notes
+                ExtractedNotesPolicy.Append -> if (notes.isNotBlank()) "$notes\n\n${extracted.notes}" else extracted.notes
+            }
+        }
+    }
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -104,7 +132,7 @@ internal fun RecipeEditor(
     ) { uri: Uri? ->
         if (uri != null) {
             if (GeminiRecipeExtractor.getApiKeys(context).isEmpty()) {
-                editorFeedbackMessage = "Please add a primary or backup Gemini API key in Settings first."
+                editorFeedbackMessage = "Connect recipe import in You first."
                 return@rememberLauncherForActivityResult
             }
             coroutineScope.launch {
@@ -122,18 +150,12 @@ internal fun RecipeEditor(
                         creatorName = creator.ifBlank { null }
                     )
 
-                    title = extracted.title
-                    if (creator.isBlank() || creator.startsWith("http")) creator = extracted.creator
-                    category = extracted.category
-                    tags = TagNormalizer.normalizeAll(extracted.tags)
-                    ingredients = extracted.ingredients.joinToString("\n")
-                    steps = extracted.steps.joinToString("\n")
-                    if (extracted.notes.isNotBlank()) notes = extracted.notes
-                    editorFeedbackMessage = "Recipe extracted from video successfully!"
+                    applyExtractedRecipe(extracted, ExtractedNotesPolicy.Replace)
+                    editorFeedbackMessage = "Your video is now a recipe."
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (e: Exception) {
-                    editorFeedbackMessage = "Video extraction failed: ${e.message}"
+                    editorFeedbackMessage = "We couldn’t read that video: ${e.message}"
                 } finally {
                     videoFile?.delete()
                     InstagramResolver.cleanCachedReelVideos(context)
@@ -146,7 +168,7 @@ internal fun RecipeEditor(
     if (showPasteCaptionDialog) {
         AlertDialog(
             onDismissRequest = { showPasteCaptionDialog = false },
-            title = { Text("Paste Recipe Caption") },
+            title = { Text("Paste recipe text") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
@@ -159,7 +181,7 @@ internal fun RecipeEditor(
                         onValueChange = { captionDialogInput = it },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 5,
-                        placeholder = { Text("Paste caption text here...") }
+                        placeholder = { Text("Paste the caption or recipe text here…") }
                     )
                 }
             },
@@ -170,7 +192,7 @@ internal fun RecipeEditor(
                         showPasteCaptionDialog = false
                         if (textToExtract.isNotBlank()) {
                             if (GeminiRecipeExtractor.getApiKeys(context).isEmpty()) {
-                                editorFeedbackMessage = "Please add a primary or backup Gemini API key in Settings first."
+                                editorFeedbackMessage = "Connect recipe import in You first."
                                 return@Button
                             }
                             coroutineScope.launch {
@@ -184,20 +206,12 @@ internal fun RecipeEditor(
                                         sourceUrl = sourceUrl.ifBlank { "Pasted caption" },
                                         creatorName = creator.ifBlank { null }
                                     )
-                                    title = extracted.title
-                                    if (creator.isBlank() || creator.startsWith("http")) creator = extracted.creator
-                                    category = extracted.category
-                                    tags = TagNormalizer.normalizeAll(extracted.tags)
-                                    ingredients = extracted.ingredients.joinToString("\n")
-                                    steps = extracted.steps.joinToString("\n")
-                                    if (extracted.notes.isNotBlank()) {
-                                        notes = if (notes.isNotBlank()) "$notes\n\n${extracted.notes}" else extracted.notes
-                                    }
-                                    editorFeedbackMessage = "Recipe extracted from caption successfully!"
+                                    applyExtractedRecipe(extracted, ExtractedNotesPolicy.Append)
+                                    editorFeedbackMessage = "Your text is now a recipe."
                                 } catch (cancelled: CancellationException) {
                                     throw cancelled
                                 } catch (e: Exception) {
-                                    editorFeedbackMessage = "Caption extraction failed: ${e.message}"
+                                    editorFeedbackMessage = "We couldn’t read that text: ${e.message}"
                                 } finally {
                                     isExtractingFromEditor = false
                                 }
@@ -206,7 +220,7 @@ internal fun RecipeEditor(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Text("Extract Recipe")
+                    Text("Build recipe")
                 }
             },
             dismissButton = {
@@ -218,38 +232,55 @@ internal fun RecipeEditor(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Review Recipe", fontWeight = FontWeight.Bold) },
                 navigationIcon = { TextButton(onClick = onCancel) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(padding)
+                .imePadding(),
             contentPadding = PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
-                Text(
-                    "Review and adjust the extracted ingredients and steps before saving to your cookbook.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "MAKE IT YOURS",
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text("A recipe, before it joins your shelf.", style = MaterialTheme.typography.headlineMedium)
+                    Text(
+                        "Check the essentials first. Everything else can be refined when you have the recipe in front of you.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
             }
 
             if (editorFeedbackMessage != null) {
                 item {
                     val isErr = editorFeedbackMessage!!.contains("failed", ignoreCase = true) ||
-                        editorFeedbackMessage!!.contains("error", ignoreCase = true)
+                        editorFeedbackMessage!!.contains("error", ignoreCase = true) ||
+                        editorFeedbackMessage!!.contains("couldn't", ignoreCase = true) ||
+                        editorFeedbackMessage!!.contains("could not", ignoreCase = true) ||
+                        editorFeedbackMessage!!.contains("try again", ignoreCase = true) ||
+                        editorFeedbackMessage!!.contains("no usable", ignoreCase = true) ||
+                        editorFeedbackMessage!!.contains("required", ignoreCase = true) ||
+                        editorFeedbackMessage!!.contains("placeholder", ignoreCase = true)
                     Card(
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isErr) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer
+                            containerColor = if (isErr) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant
                         ),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(4.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -258,28 +289,33 @@ internal fun RecipeEditor(
                         ) {
                             Text(
                                 editorFeedbackMessage!!,
-                                color = if (isErr) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                color = if (isErr) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.weight(1f)
                             )
                             IconButton(onClick = { editorFeedbackMessage = null }) {
-                                Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = if (isErr) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = if (isErr) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
                 }
             }
 
-            // Quick AI Tools Toolbar
+            // A quiet recovery area rather than a generic stack of equal-weight utility buttons.
             item {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    shape = RoundedCornerShape(16.dp),
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(4.dp),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Import tools", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Need another pass?", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            "Add a video or paste the caption if the draft needs more recipe detail.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -292,7 +328,7 @@ internal fun RecipeEditor(
                             ) {
                                 Icon(Icons.Default.PlayCircle, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                                 Spacer(Modifier.size(4.dp))
-                                Text("Attach Video", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Video", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
 
                             OutlinedButton(
@@ -304,46 +340,39 @@ internal fun RecipeEditor(
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                                 Spacer(Modifier.size(4.dp))
-                                Text("Paste Caption", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Paste text", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
 
                         if (onTriggerAiExtraction != null && sourceUrl.isNotBlank()) {
-                            Button(
+                            OutlinedButton(
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
                                     isExtractingFromEditor = true
-                                    editorFeedbackMessage = "Re-extracting from Instagram link..."
+                                    editorFeedbackMessage = "Refreshing from Instagram…"
                                     onTriggerAiExtraction(sourceUrl, notes) { result ->
                                         isExtractingFromEditor = false
                                         result.onSuccess { extracted ->
-                                            title = extracted.title
-                                            if (creator.isBlank() || creator.startsWith("http")) creator = extracted.creator
-                                            category = extracted.category
-                                            tags = TagNormalizer.normalizeAll(extracted.tags)
-                                            ingredients = extracted.ingredients.joinToString("\n")
-                                            steps = extracted.steps.joinToString("\n")
-                                            if (extracted.notes.isNotBlank()) notes = extracted.notes
-                                            editorFeedbackMessage = "Extracted successfully!"
+                                            applyExtractedRecipe(extracted, ExtractedNotesPolicy.Replace)
+                                            editorFeedbackMessage = "Recipe details found. Review them before saving."
                                         }.onFailure { error ->
                                             editorFeedbackMessage = error.message ?: "Extraction failed. Please try again."
                                         }
                                     }
                                 },
                                 enabled = !isExtractingFromEditor,
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
                                 if (isExtractingFromEditor) {
-                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
                                     Spacer(Modifier.size(8.dp))
                                     Text("Creating recipe…")
                                 } else {
                                     Icon(Icons.Default.Refresh, contentDescription = null)
                                     Spacer(Modifier.size(6.dp))
-                                    Text("Import from link again", fontWeight = FontWeight.Bold)
+                                    Text("Refresh from link", fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -354,7 +383,34 @@ internal fun RecipeEditor(
             item { Field("Title", title) { title = it } }
             item { Field("Instagram Link", sourceUrl) { sourceUrl = it } }
             item { Field("Creator / Chef", creator) { creator = it } }
-            item { Field("Category", category) { category = it } }
+            item { Field("Category (optional)", category) { category = it } }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Diet", style = MaterialTheme.typography.labelLarge)
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            DietType.Unknown to "Not set",
+                            DietType.Vegetarian to "Veg",
+                            DietType.NonVegetarian to "Non-veg",
+                            DietType.Vegan to "Vegan"
+                        ).forEach { (value, label) ->
+                            InputChip(
+                                selected = dietType == value,
+                                onClick = { dietType = value },
+                                label = { Text(label) },
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            )
+                        }
+                    }
+                }
+            }
+            item { Field("Total time in minutes (when supplied)", totalTimeMinutes) { totalTimeMinutes = it.filter(Char::isDigit) } }
+            item { Field("Active time in minutes (when supplied)", activeTimeMinutes) { activeTimeMinutes = it.filter(Char::isDigit) } }
+            item { Field("Yield / servings (when supplied)", recipeYield) { recipeYield = it } }
+            item { Field("Skill level (when supplied)", skillLevel) { skillLevel = it } }
             item {
                 TagEditor(
                     tags = tags,
@@ -373,23 +429,38 @@ internal fun RecipeEditor(
                         .fillMaxWidth()
                         .height(54.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(12.dp),
                     onClick = {
+                        val cleanTitle = title.trim()
+                        val cleanIngredients = ingredients.lines().map(String::trim).filter(String::isNotBlank)
+                        val cleanSteps = steps.lines().map(String::trim).filter(String::isNotBlank)
+                        val qualityFailure = assessRecipeQuality(cleanTitle, cleanIngredients, cleanSteps).failure
+                        if (qualityFailure != null) {
+                            editorFeedbackMessage = "${qualityFailure.userMessage()} Add the missing details before saving."
+                            return@Button
+                        }
                         onSave(
                             Recipe(
                                 id = recipe?.id?.takeIf { it != 0L } ?: 0L,
-                                title = title.ifBlank { "Untitled Recipe" },
+                                title = cleanTitle,
                                 sourceUrl = sourceUrl.trim(),
                                 creator = creator.trim(),
-                                category = category.ifBlank { "Saved to try" },
+                                category = category.trim().ifBlank { "Other" },
                                 tags = TagNormalizer.normalizeAll(tags + TagNormalizer.parse(tagDraft)),
-                                ingredients = ingredients.lines().map { it.trim() }.filter { it.isNotBlank() },
-                                steps = steps.lines().map { it.trim() }.filter { it.isNotBlank() },
+                                ingredients = cleanIngredients,
+                                steps = cleanSteps,
                                 notes = notes.trim(),
                                 favorite = recipe?.favorite ?: false,
                                 cooked = recipe?.cooked ?: false,
                                 status = RecipeStatus.Saved,
-                                savedDate = recipe?.savedDate ?: LocalDate.now().toString()
+                                savedDate = recipe?.savedDate ?: LocalDate.now().toString(),
+                                totalTimeMinutes = totalTimeMinutes.toIntOrNull()?.takeIf { it > 0 },
+                                activeTimeMinutes = activeTimeMinutes.toIntOrNull()?.takeIf { it > 0 },
+                                yield = recipeYield.trim(),
+                                skillLevel = skillLevel.trim(),
+                                cookPhotoPath = recipe?.cookPhotoPath.orEmpty(),
+                                cookedAt = recipe?.cookedAt,
+                                dietType = dietType
                             )
                         )
                     }
