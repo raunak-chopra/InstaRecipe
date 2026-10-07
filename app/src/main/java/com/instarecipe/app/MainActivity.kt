@@ -638,6 +638,7 @@ private fun InstaRecipeApp(
                     onImportVideo = { importVideoLauncher.launch("video/*") },
                     onRetryInstagramImport = viewModel::retryInstagramImport,
                     retryingInstagramImportIds = retryingInstagramImportIds,
+                    searchRecipeIds = viewModel::searchRecipeIds,
                     themeMode = themeMode,
                     onThemeModeChange = { selectedMode ->
                         themeMode = selectedMode

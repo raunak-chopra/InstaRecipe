@@ -22,14 +22,35 @@ class RecipeSearchTest {
         savedDate = "2026-09-11"
     )
 
-    @Test fun `search index matches multiple terms across fields`() {
-        val results = searchRecipes(buildRecipeSearchIndex(listOf(pasta)), "tomato garlic")
-        assertEquals(listOf(pasta), results)
+    @Test fun `fts query requires every word as a quoted prefix`() {
+        assertEquals("\"tomato\"* \"garlic\"*", ftsMatchQuery("  Tomato, garlic "))
     }
 
-    @Test fun `quick recipe parsing caches one shared regular expression`() {
+    @Test fun `fts query strips operators so input cannot change the match syntax`() {
+        assertEquals("\"near\"* \"or\"* \"x\"*", ftsMatchQuery("NEAR OR \"x*\" -"))
+        assertEquals(null, ftsMatchQuery(" *\"- "))
+    }
+
+    @Test fun `fts query keeps non latin words`() {
+        assertEquals("\"पनीर\"*", ftsMatchQuery("पनीर"))
+    }
+
+    @Test fun `blank search keeps list and otherwise preserves list order`() {
+        val other = pasta.copy(id = 2)
+        val recipes = listOf(other, pasta)
+        assertEquals(recipes, recipes.filterBySearch(" ", emptySet()))
+        assertEquals(recipes, recipes.filterBySearch("x", setOf(1, 2)))
+        assertEquals(listOf(pasta), recipes.filterBySearch("x", setOf(1)))
+    }
+
+    @Test fun `quick recipe falls back to times in notes`() {
         assertTrue(isQuickRecipe(pasta))
         assertFalse(isQuickRecipe(pasta.copy(notes = "Cook time: 35 minutes")))
+    }
+
+    @Test fun `quick recipe prefers structured total time over notes`() {
+        assertFalse(isQuickRecipe(pasta.copy(totalTimeMinutes = 45)))
+        assertTrue(isQuickRecipe(pasta.copy(notes = "Cook time: 35 minutes", totalTimeMinutes = 15)))
     }
 
     @Test fun `home category recognizes meal and diet filters`() {

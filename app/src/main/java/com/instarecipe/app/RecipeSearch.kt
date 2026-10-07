@@ -1,42 +1,17 @@
 package com.instarecipe.app
 
-import java.util.Locale
-
 private val QuickTimePattern = Regex(
     """(?i)(?:prep|cook|total)?\s*time:?\s*(\d+)\s*(?:mins?|minutes?)"""
 )
 
-data class SearchableRecipe(
-    val recipe: Recipe,
-    val searchableText: String
-)
-
-fun buildRecipeSearchIndex(recipes: List<Recipe>): List<SearchableRecipe> = recipes.map { recipe ->
-    SearchableRecipe(
-        recipe = recipe,
-        searchableText = buildString {
-            append(recipe.title).append(' ')
-            append(recipe.creator).append(' ')
-            append(recipe.category).append(' ')
-            append(recipe.tags.joinToString(" ")).append(' ')
-            append(recipe.ingredients.joinToString(" ")).append(' ')
-            append(recipe.steps.joinToString(" ")).append(' ')
-            append(recipe.notes)
-        }.lowercase(Locale.ROOT)
-    )
-}
-
-fun searchRecipes(index: List<SearchableRecipe>, query: String): List<Recipe> {
-    val terms = query.trim().lowercase(Locale.ROOT).split(Regex("""\s+""")).filter(String::isNotBlank)
-    if (terms.isEmpty()) return emptyList()
-    return index.asSequence()
-        .filter { entry -> terms.all(entry.searchableText::contains) }
-        .map(SearchableRecipe::recipe)
-        .toList()
-}
+/** Keeps [recipes] order while limiting it to full-text matches; a blank query keeps everything. */
+fun List<Recipe>.filterBySearch(query: String, matchingIds: Set<Long>): List<Recipe> =
+    if (query.isBlank()) this else filter { it.id in matchingIds }
 
 fun isQuickRecipe(recipe: Recipe): Boolean {
     if (TagNormalizer.matches(recipe.tags, "Quick")) return true
+    // Structured time wins; older imports only carry times inside free-text notes.
+    recipe.totalTimeMinutes?.let { return it in 1..20 }
     val totalMinutes = QuickTimePattern.findAll(recipe.notes)
         .mapNotNull { it.groupValues.getOrNull(1)?.toIntOrNull() }
         .sum()

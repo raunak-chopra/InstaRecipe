@@ -113,6 +113,8 @@ import com.instarecipe.app.ui.theme.AppRadii
 import com.instarecipe.app.ui.theme.LocalMotionMode
 import com.instarecipe.app.ui.theme.MotionMode
 import com.instarecipe.app.ui.theme.ThemeMode
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import com.instarecipe.app.*
 
@@ -135,6 +137,7 @@ internal fun MainScaffold(
     onImportVideo: () -> Unit,
     onRetryInstagramImport: (Recipe) -> Unit,
     retryingInstagramImportIds: Set<Long>,
+    searchRecipeIds: (String) -> Flow<Set<Long>>,
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
     motionMode: MotionMode,
@@ -303,7 +306,8 @@ internal fun MainScaffold(
                     onOpenImports = { onTabSelected(Tab.Inbox) },
                     onSaveReel = { showAddSheet = true },
                     onRetryInstagramImport = onRetryInstagramImport,
-                    retryingInstagramImportIds = retryingInstagramImportIds
+                    retryingInstagramImportIds = retryingInstagramImportIds,
+                    searchRecipeIds = searchRecipeIds
                 )
 
                 Tab.Collections -> CollectionsTabScreen(
@@ -683,12 +687,14 @@ private fun LibraryTabScreen(
     onOpenImports: () -> Unit,
     onSaveReel: () -> Unit,
     onRetryInstagramImport: (Recipe) -> Unit,
-    retryingInstagramImportIds: Set<Long>
+    retryingInstagramImportIds: Set<Long>,
+    searchRecipeIds: (String) -> Flow<Set<Long>>
 ) {
     var query by rememberSaveable { mutableStateOf("") }
-    val searchIndex = remember(recipes) { buildRecipeSearchIndex(recipes) }
-    val searchedRecipes = remember(query, searchIndex) {
-        if (query.isBlank()) recipes else searchRecipes(searchIndex, query)
+    val matchingIds by remember(query) { searchRecipeIds(query) }
+        .collectAsStateWithLifecycle(initialValue = emptySet())
+    val searchedRecipes = remember(query, matchingIds, recipes) {
+        recipes.filterBySearch(query, matchingIds)
     }
     val filters = remember(recipes) {
         val builtIns = listOf(

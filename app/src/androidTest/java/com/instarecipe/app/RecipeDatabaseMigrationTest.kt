@@ -111,6 +111,37 @@ class RecipeDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migrate5To6IndexesExistingRowsForFullTextSearch() {
+        helper.createDatabase("migration-v5-v6", 5).apply {
+            insertRecipe(10, "Paneer tikka", "https://www.instagram.com/reel/paneer/")
+            execSQL("UPDATE recipes SET ingredientsJson = '[\"yogurt\",\"garam masala\"]' WHERE id = 10")
+            insertRecipe(11, "Lemon rice", "https://www.instagram.com/reel/rice/")
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            "migration-v5-v6",
+            6,
+            true,
+            InstaRecipeDatabase.MIGRATION_5_6
+        ).use { database ->
+            database.query("SELECT rowid FROM recipes_fts WHERE recipes_fts MATCH '\"garam\"* \"paneer\"*'").use { cursor ->
+                assertEquals(1, cursor.count)
+                cursor.moveToFirst()
+                assertEquals(10L, cursor.getLong(0))
+            }
+            // Room's content-sync triggers keep the index current after migration.
+            database.execSQL("UPDATE recipes SET title = 'Tamarind rice' WHERE id = 11")
+            database.query("SELECT rowid FROM recipes_fts WHERE recipes_fts MATCH '\"tamar\"*'").use { cursor ->
+                assertEquals(1, cursor.count)
+            }
+            database.query("SELECT rowid FROM recipes_fts WHERE recipes_fts MATCH '\"lemon\"*'").use { cursor ->
+                assertEquals(0, cursor.count)
+            }
+        }
+    }
+
     private fun SupportSQLiteDatabase.insertRecipe(id: Long, title: String, normalizedUrl: String) {
         execSQL(
             """

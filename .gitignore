@@ -29,3 +29,6 @@ scratch/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Kotlin compiler caches
+.kotlin/

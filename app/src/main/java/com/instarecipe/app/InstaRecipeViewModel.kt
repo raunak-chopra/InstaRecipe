@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.Dispatchers
@@ -100,6 +101,8 @@ class InstaRecipeViewModel(
     fun upsert(recipe: Recipe, onPersisted: (Recipe) -> Unit = {}) {
         viewModelScope.launch { onPersisted(persistRecipe(repository, recipe)) }
     }
+
+    fun searchRecipeIds(query: String): Flow<Set<Long>> = repository.searchIds(query)
 
     suspend fun upsertAndAwait(recipe: Recipe): Recipe = persistRecipe(repository, recipe)
 

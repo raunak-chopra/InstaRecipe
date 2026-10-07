@@ -37,6 +37,7 @@ class RecipePersistenceTest {
 
 private class RecordingRecipeStore(private val generatedId: Long) : RecipeStore {
     override val recipes: Flow<List<Recipe>> = emptyFlow()
+    override fun searchIds(query: String): Flow<Set<Long>> = emptyFlow()
     var lastUpserted: Recipe? = null
 
     override suspend fun upsert(recipe: Recipe): Recipe {

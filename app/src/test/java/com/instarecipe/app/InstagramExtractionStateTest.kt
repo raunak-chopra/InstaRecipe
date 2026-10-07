@@ -332,6 +332,7 @@ class InstagramExtractionStateTest {
 
 private class ExtractionRecipeStore(initial: Recipe?) : RecipeStore {
     override val recipes: Flow<List<Recipe>> = emptyFlow()
+    override fun searchIds(query: String): Flow<Set<Long>> = emptyFlow()
     private var current = initial
     var upsertCount = 0
 
