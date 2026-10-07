@@ -18,9 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.instarecipe.app.ui.theme.DeepBasil
-import com.instarecipe.app.ui.theme.DeepBasilContainer
-import com.instarecipe.app.ui.theme.HerbMuted
 import java.math.BigDecimal
 import java.math.RoundingMode
 

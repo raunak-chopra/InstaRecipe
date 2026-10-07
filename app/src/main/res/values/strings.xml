@@ -1,0 +1,19 @@
+<resources>
+    <string name="cooking_mode_title">Cooking mode</string>
+    <string name="cooking_exit">Exit Cooking Mode</string>
+    <string name="cooking_step_of">Step %1$d of %2$d</string>
+    <string name="cooking_screen_awake">Screen Awake</string>
+    <string name="cooking_current_step">Current step</string>
+    <string name="cooking_no_steps">No steps specified for this recipe.</string>
+    <string name="cooking_hide_ingredients">Hide Ingredients</string>
+    <string name="cooking_peek_ingredients">Peek Ingredients (%1$d)</string>
+    <string name="cooking_ingredient_item">• %1$s</string>
+    <string name="cooking_previous">Previous</string>
+    <string name="cooking_next_step">Next Step</string>
+    <string name="cooking_finish_mark_cooked">Finish &amp; Mark Cooked</string>
+    <string name="cooking_pause_timer">Pause timer</string>
+    <string name="cooking_resume_timer">Resume timer</string>
+    <string name="cooking_reset_timer">Reset timer</string>
+    <string name="cooking_add_one_minute">+1m</string>
+    <string name="cooking_add_five_minutes">+5m</string>
+</resources>

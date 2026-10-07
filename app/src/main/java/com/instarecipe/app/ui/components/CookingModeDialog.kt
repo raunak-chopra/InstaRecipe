@@ -4,8 +4,13 @@ import android.app.Activity
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +20,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -60,28 +67,36 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.instarecipe.app.ui.theme.BorderSubtle
-import com.instarecipe.app.ui.theme.CharcoalSlate
-import com.instarecipe.app.ui.theme.DeepBasil
-import com.instarecipe.app.ui.theme.DeepBasilContainer
-import com.instarecipe.app.ui.theme.GoldenHoney
-import com.instarecipe.app.ui.theme.HerbMuted
-import com.instarecipe.app.ui.theme.SuccessSage
-import com.instarecipe.app.ui.theme.ToastedSesame
-import com.instarecipe.app.ui.theme.WarmSaffron
 import com.instarecipe.app.ui.theme.AppMotion
+import com.instarecipe.app.ui.theme.AppRadii
 import com.instarecipe.app.ui.theme.LocalRecipeTypeScale
+import com.instarecipe.app.ui.theme.LocalMotionMode
 import com.instarecipe.app.ui.theme.LocalReducedMotion
+import com.instarecipe.app.ui.theme.MotionMode
 import kotlinx.coroutines.delay
+import com.instarecipe.app.R
 
 @Composable
 fun CookingModeDialog(
@@ -104,16 +119,41 @@ fun CookingModeDialog(
 
     var currentStepIndex by rememberSaveable { mutableIntStateOf(0) }
     var showIngredientsSummary by rememberSaveable { mutableStateOf(false) }
+    val motionMode = LocalMotionMode.current
+    val focusRequester = remember { FocusRequester() }
 
     val totalSteps = steps.size.coerceAtLeast(1)
     val progress = (currentStepIndex + 1).toFloat() / totalSteps.toFloat()
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
 
     Dialog(
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .focusRequester(focusRequester)
+                .focusable()
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyUp) return@onPreviewKeyEvent false
+                    when (event.key) {
+                        Key.VolumeUp -> {
+                            if (currentStepIndex >= totalSteps - 1) return@onPreviewKeyEvent false
+                            currentStepIndex += 1
+                            true
+                        }
+                        Key.VolumeDown -> {
+                            if (currentStepIndex <= 0) return@onPreviewKeyEvent false
+                            currentStepIndex -= 1
+                            true
+                        }
+                        else -> false
+                    }
+                },
             color = MaterialTheme.colorScheme.background
         ) {
             Column(
@@ -148,7 +188,7 @@ fun CookingModeDialog(
                                 )
                             }
                             Text(
-                                "Cooking Mode",
+                                stringResource(R.string.cooking_mode_title),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
@@ -156,7 +196,7 @@ fun CookingModeDialog(
                         }
 
                         IconButton(onClick = onClose) {
-                            Icon(Icons.Default.Close, contentDescription = "Exit Cooking Mode", tint = MaterialTheme.colorScheme.onSurface)
+                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cooking_exit), tint = MaterialTheme.colorScheme.onSurface)
                         }
                     }
 
@@ -178,7 +218,7 @@ fun CookingModeDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "Step ${currentStepIndex + 1} of $totalSteps",
+                            stringResource(R.string.cooking_step_of, currentStepIndex + 1, totalSteps),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold
@@ -194,7 +234,7 @@ fun CookingModeDialog(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                "Screen Awake",
+                                stringResource(R.string.cooking_screen_awake),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -220,36 +260,46 @@ fun CookingModeDialog(
                         .padding(vertical = 16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     shape = MaterialTheme.shapes.medium,
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(24.dp),
+                            .padding(24.dp)
+                            .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column {
                             Text(
-                                "INSTRUCTION",
+                                stringResource(R.string.cooking_current_step),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 1.sp
                             )
                             Spacer(Modifier.height(16.dp))
-                            val reducedMotion = LocalReducedMotion.current
                             Crossfade(
                                 targetState = currentStepIndex,
-                                animationSpec = if (reducedMotion) snap() else tween(
+                                animationSpec = if (motionMode == MotionMode.Standard && !LocalReducedMotion.current) tween(
                                     durationMillis = AppMotion.content,
                                     easing = AppMotion.standardEasing
-                                ),
+                                ) else snap(),
                                 label = "cooking step"
                             ) { stepIndex ->
+                                val stepDescription = stringResource(
+                                    R.string.cooking_step_of,
+                                    stepIndex + 1,
+                                    totalSteps
+                                )
                                 Text(
-                                    text = if (steps.isNotEmpty()) steps[stepIndex] else "No steps specified for this recipe.",
+                                    text = if (steps.isNotEmpty()) steps[stepIndex] else stringResource(R.string.cooking_no_steps),
                                     style = LocalRecipeTypeScale.current.instruction,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.semantics {
+                                        liveRegion = LiveRegionMode.Polite
+                                        stateDescription = stepDescription
+                                    }
                                 )
                             }
                         }
@@ -261,10 +311,17 @@ fun CookingModeDialog(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text(if (showIngredientsSummary) "Hide Ingredients" else "Peek Ingredients (${ingredients.size})")
+                                Text(
+                                    if (showIngredientsSummary) stringResource(R.string.cooking_hide_ingredients)
+                                    else stringResource(R.string.cooking_peek_ingredients, ingredients.size)
+                                )
                             }
 
-                            AnimatedVisibility(visible = showIngredientsSummary) {
+                            AnimatedVisibility(
+                                visible = showIngredientsSummary,
+                                enter = if (motionMode == MotionMode.Standard && !LocalReducedMotion.current) fadeIn(tween(AppMotion.content)) else EnterTransition.None,
+                                exit = if (motionMode == MotionMode.Standard && !LocalReducedMotion.current) fadeOut(tween(AppMotion.state)) else ExitTransition.None
+                            ) {
                                 Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -281,7 +338,7 @@ fun CookingModeDialog(
                                     ) {
                                         items(ingredients, contentType = { "ingredient" }) { ing ->
                                             Text(
-                                                "• $ing",
+                                                stringResource(R.string.cooking_ingredient_item, ing),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
@@ -308,11 +365,11 @@ fun CookingModeDialog(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(54.dp),
-                            shape = RoundedCornerShape(16.dp)
+                            shape = RoundedCornerShape(AppRadii.control)
                         ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
                             Spacer(Modifier.size(6.dp))
-                            Text("Previous")
+                            Text(stringResource(R.string.cooking_previous))
                         }
 
                         if (currentStepIndex < totalSteps - 1) {
@@ -322,9 +379,9 @@ fun CookingModeDialog(
                                     .weight(1f)
                                     .height(54.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                shape = RoundedCornerShape(16.dp)
+                                shape = RoundedCornerShape(AppRadii.control)
                             ) {
-                                Text("Next Step")
+                                Text(stringResource(R.string.cooking_next_step))
                                 Spacer(Modifier.size(6.dp))
                                 Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
                             }
@@ -338,11 +395,11 @@ fun CookingModeDialog(
                                     .weight(1f)
                                     .height(54.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                shape = RoundedCornerShape(16.dp)
+                                shape = RoundedCornerShape(AppRadii.control)
                             ) {
                                 Icon(Icons.Default.Check, contentDescription = null)
                                 Spacer(Modifier.size(6.dp))
-                                Text("Finish & Mark Cooked")
+                                Text(stringResource(R.string.cooking_finish_mark_cooked))
                             }
                         }
                     }
@@ -393,18 +450,24 @@ private fun KitchenTimer() {
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                TextButton(onClick = { secondsRemaining += 60; isRunning = true }) { Text("+1m", fontWeight = FontWeight.SemiBold) }
-                TextButton(onClick = { secondsRemaining += 300; isRunning = true }) { Text("+5m", fontWeight = FontWeight.SemiBold) }
+                TextButton(onClick = { secondsRemaining += 60; isRunning = true }) {
+                    Text(stringResource(R.string.cooking_add_one_minute), fontWeight = FontWeight.SemiBold)
+                }
+                TextButton(onClick = { secondsRemaining += 300; isRunning = true }) {
+                    Text(stringResource(R.string.cooking_add_five_minutes), fontWeight = FontWeight.SemiBold)
+                }
                 if (secondsRemaining > 0) {
                     IconButton(onClick = { isRunning = !isRunning }) {
                         Icon(
                             if (isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isRunning) "Pause timer" else "Resume timer",
+                            contentDescription = stringResource(
+                                if (isRunning) R.string.cooking_pause_timer else R.string.cooking_resume_timer
+                            ),
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
                     IconButton(onClick = { secondsRemaining = 0; isRunning = false }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Reset timer", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.cooking_reset_timer), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }

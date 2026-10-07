@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
@@ -19,12 +18,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.instarecipe.app.ui.theme.DeepBasil
-import com.instarecipe.app.ui.theme.DeepBasilContainer
-import com.instarecipe.app.ui.theme.WarmSaffron
+import com.instarecipe.app.ui.theme.AppRadii
 
 data class CategoryFilter(
     val id: String,
@@ -67,7 +63,7 @@ fun CategoryFilterRow(
                                 Icons.Default.Favorite,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
-                                tint = if (isSelected) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline
+                                tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.outline
                             )
                         }
                     }
@@ -77,7 +73,7 @@ fun CategoryFilterRow(
                                 Icons.Default.Timer,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
-                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.outline
                             )
                         }
                     }
@@ -87,7 +83,7 @@ fun CategoryFilterRow(
                                 Icons.Default.CheckCircle,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
-                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.outline
                             )
                         }
                     }
@@ -102,10 +98,10 @@ fun CategoryFilterRow(
                 },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.primary,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     containerColor = MaterialTheme.colorScheme.surface
                 ),
-                shape = RoundedCornerShape(16.dp)
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(AppRadii.surface)
             )
         }
     }

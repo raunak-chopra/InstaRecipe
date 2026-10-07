@@ -21,8 +21,25 @@ data class ExtractedRecipeData(
     val ingredients: List<String>,
     val steps: List<String>,
     val notes: String,
-    val sourceUrl: String
+    val sourceUrl: String,
+    val totalTimeMinutes: Int? = null,
+    val dietType: DietType = DietType.Unknown
 )
+
+internal fun ExtractedRecipeData.hasUsableRecipeContent(): Boolean =
+    assessRecipeQuality(title, ingredients, steps).isValid
+
+/** Parses only explicit creator-supplied time values; unknown formats stay absent. */
+internal fun parseRecipeTimeMinutes(value: String?): Int {
+    val source = value?.trim().orEmpty()
+    if (source.isBlank()) return 0
+    val hours = Regex("""(\d+)\s*(?:h|hr|hrs|hour|hours)""", RegexOption.IGNORE_CASE)
+        .find(source)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+    val minutes = Regex("""(\d+)\s*(?:m|min|mins|minute|minutes)""", RegexOption.IGNORE_CASE)
+        .find(source)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        ?: if (hours == 0) source.toIntOrNull() ?: 0 else 0
+    return (hours * 60) + minutes
+}
 
 internal suspend fun <T> withGeminiKeyFallback(
     apiKeys: List<String>,
@@ -50,13 +67,14 @@ object GeminiRecipeExtractor {
     const val PREFS_SETTINGS = "insta_recipe_settings"
     const val KEY_API_KEY = "gemini_api_key"
     const val KEY_CUSTOM_RESOLVER = "custom_resolver_url"
+    const val KEY_INSTAGRAM_PROFILE = "instagram_profile_url"
     private const val LEGACY_KEY_SELECTED_MODEL = "gemini_selected_model"
 
     private val generationClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(70, TimeUnit.SECONDS)
-        .writeTimeout(45, TimeUnit.SECONDS)
-        .callTimeout(75, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(50, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(55, TimeUnit.SECONDS)
         .build()
 
     private val connectionTestClient = generationClient.newBuilder()
@@ -118,6 +136,18 @@ object GeminiRecipeExtractor {
             .apply()
     }
 
+    fun getInstagramProfileUrl(context: Context): String {
+        val prefs = context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_INSTAGRAM_PROFILE, null)?.trim().orEmpty()
+    }
+
+    fun setInstagramProfileUrl(context: Context, url: String) {
+        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_INSTAGRAM_PROFILE, url.trim())
+            .apply()
+    }
+
     /**
      * Checks if a string contains actual descriptive recipe text or caption
      * rather than being just a URL or placeholder.
@@ -134,8 +164,12 @@ object GeminiRecipeExtractor {
                     !word.startsWith("www.", ignoreCase = true) &&
                     !word.contains("instagram.com", ignoreCase = true)
             }
-        // At least 4 non-URL words and 15 chars of actual description
-        return nonUrlWords.size >= 4 && nonUrlWords.joinToString(" ").length >= 15
+        val description = nonUrlWords.joinToString(" ")
+        val evidenceSignals = Regex(
+            """(?i)\b(tbsp|tsp|cup|cups|gram|grams|kg|ml|teaspoon|tablespoon|salt|pepper|oil|flour|sugar|rice|pasta|paneer|chicken|add|mix|stir|fry|bake|boil|roast|simmer|marinate|serve|preheat)\b"""
+        ).findAll(description).count()
+        // A URL plus generic social copy is not enough evidence to send to Gemini as a recipe.
+        return nonUrlWords.size >= 4 && description.length >= 15 && evidenceSignals >= 1
     }
 
     /**
@@ -171,7 +205,7 @@ object GeminiRecipeExtractor {
         }
         val generatedRecipe = withGeminiKeyFallback(
             apiKeys = apiKeys,
-            onBackupKey = { onStatus("Free key was unavailable. Trying the paid fallback…") }
+            onBackupKey = { onStatus("Primary key unavailable. Trying the backup key…") }
         ) { apiKey ->
             apiClient.generateRecipe(
                 apiKey = apiKey,
@@ -221,7 +255,8 @@ object GeminiRecipeExtractor {
             append("{\n")
             append("  \"title\": \"Appetizing, accurate recipe title\",\n")
             append("  \"creator\": \"${creatorName ?: "Creator name if mentioned in video/caption"}\",\n")
-            append("  \"category\": \"Category (e.g. Breakfast, Lunch, Dinner, Snacks, Desserts, Drinks, Quick recipes, Saved to try)\",\n")
+            append("  \"dietType\": \"veg, non_veg, vegan, or unknown\",\n")
+            append("  \"category\": \"Category (e.g. Breakfast, Lunch, Dinner, Snack, Other)\",\n")
             append("  \"tags\": [\"Tag1\", \"Tag2\"],\n")
             append("  \"ingredients\": [\n")
             append("    \"Exact ingredient with quantity and unit (e.g. 200g paneer cubed)\"\n")
@@ -231,7 +266,9 @@ object GeminiRecipeExtractor {
             append("  ],\n")
             append("  \"prepTime\": \"e.g. 10 mins\",\n")
             append("  \"cookTime\": \"e.g. 15 mins\",\n")
-            append("  \"notes\": \"Chef tips, serving advice, dietary notes\"\n")
+            append("  \"notes\": \"Chef tips, serving advice, dietary notes\",\n")
+            append("  \"extractionStatus\": \"complete, partial, or no_recipe\",\n")
+            append("  \"missingDetails\": []\n")
             append("}\n")
         }
     }
@@ -246,25 +283,41 @@ object GeminiRecipeExtractor {
             .removePrefix("```")
             .removeSuffix("```")
             .trim()
+            .let { text ->
+                val start = text.indexOf('{')
+                val end = text.lastIndexOf('}')
+                if (start >= 0 && end > start) text.substring(start, end + 1) else text
+            }
         val recipe = try {
             GeminiJson.decodeFromString<RecipePayloadDto>(cleanJson)
         } catch (_: SerializationException) {
             throw RuntimeException("Gemini returned malformed recipe JSON.")
         }
 
-        val title = recipe.title.orEmpty().ifBlank { "Instagram Recipe" }
+        val title = recipe.title.orEmpty().trim()
         val creator = recipe.creator.orEmpty().ifBlank { fallbackCreator.orEmpty() }
-        val category = recipe.category.orEmpty().ifBlank { "Saved to try" }
+        val category = recipe.category.orEmpty().ifBlank { "Other" }
         val tags = recipe.tags?.filter { it.isNotBlank() } ?: listOf("Instagram")
-        val ingredients = recipe.ingredients?.filter { it.isNotBlank() }.orEmpty()
-        val steps = recipe.steps?.filter { it.isNotBlank() }.orEmpty()
+        val ingredients = recipe.ingredients?.map(String::trim)?.filter(String::isNotBlank).orEmpty()
+        val steps = (recipe.steps ?: recipe.instructions).orEmpty().map(String::trim).filter(String::isNotBlank)
+        val extractionStatus = recipe.extractionStatus.orEmpty().trim().lowercase()
+        if (extractionStatus.isNotBlank() && extractionStatus !in setOf("complete", "partial", "no_recipe")) {
+            throw IllegalStateException("Gemini returned an unknown extraction status.")
+        }
+        if (extractionStatus == "partial" || extractionStatus == "no_recipe") {
+            val missing = recipe.missingDetails.orEmpty().filter(String::isNotBlank).take(2)
+            val detail = missing.joinToString(", ").takeIf(String::isNotBlank)
+            throw IllegalStateException(
+                "Gemini could not identify a complete recipe${detail?.let { ": $it" }.orEmpty()}."
+            )
+        }
         val combinedNotes = buildString {
             recipe.prepTime?.takeIf { it.isNotBlank() }?.let { append("Prep Time: $it\n") }
             recipe.cookTime?.takeIf { it.isNotBlank() }?.let { append("Cook Time: $it\n") }
             recipe.notes?.takeIf { it.isNotBlank() }?.let(::append)
         }.trim()
 
-        return ExtractedRecipeData(
+        val extracted = ExtractedRecipeData(
             title = title,
             creator = creator,
             category = category,
@@ -272,8 +325,23 @@ object GeminiRecipeExtractor {
             ingredients = ingredients,
             steps = steps,
             notes = combinedNotes,
-            sourceUrl = sourceUrl
+            sourceUrl = sourceUrl,
+            totalTimeMinutes = (parseRecipeTimeMinutes(recipe.prepTime) + parseRecipeTimeMinutes(recipe.cookTime))
+                .takeIf { it > 0 },
+            dietType = parseDietType(recipe.dietType)
         )
+        val qualityFailure = assessRecipeQuality(extracted.title, extracted.ingredients, extracted.steps).failure
+        check(qualityFailure == null) {
+            "${qualityFailure?.userMessage() ?: "The recipe details were incomplete."} Add the Reel video or paste its caption, then try again."
+        }
+        return extracted
+    }
+
+    private fun parseDietType(value: String?): DietType = when (value?.trim()?.lowercase()) {
+        "veg", "vegetarian" -> DietType.Vegetarian
+        "non_veg", "non-veg", "nonveg", "non vegetarian", "non-vegetarian" -> DietType.NonVegetarian
+        "vegan", "plant_based", "plant-based" -> DietType.Vegan
+        else -> DietType.Unknown
     }
 
     /**
@@ -281,8 +349,8 @@ object GeminiRecipeExtractor {
      */
     suspend fun testConnections(primary: String, backup: String): Result<String> = withContext(Dispatchers.IO) {
         val keyedChecks = listOf(
-            "Free key" to primary.trim(),
-            "Paid fallback" to backup.trim()
+            "Primary key" to primary.trim(),
+            "Backup key" to backup.trim()
         ).filter { (_, key) -> key.isNotBlank() }.distinctBy { (_, key) -> key }
         if (keyedChecks.isEmpty()) return@withContext Result.failure(IllegalArgumentException("Enter at least one API key."))
         try {

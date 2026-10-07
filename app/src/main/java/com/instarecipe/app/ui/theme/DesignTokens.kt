@@ -1,11 +1,8 @@
 package com.instarecipe.app.ui.theme
 
 import android.animation.ValueAnimator
-import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -20,13 +17,14 @@ object AppSpacing {
     val lg = 20.dp
     val xl = 24.dp
     val xxl = 32.dp
+    val section = 48.dp
 }
 
 @Immutable
 object AppRadii {
-    val compact = 8.dp
+    val hairline = 2.dp
+    val surface = 4.dp
     val control = 12.dp
-    val surface = 16.dp
 }
 
 @Immutable
@@ -35,15 +33,25 @@ object AppElevation {
     val raised = 2.dp
 }
 
-@Immutable
-object AppMotion {
-    const val state = 110
-    const val content = 190
-    const val screen = 250
-    val standardEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+enum class MotionMode(
+    val label: String,
+    val description: String
+) {
+    Standard("Standard", "Gentle page and recipe transitions."),
+    Reduced("Reduced", "Less movement, with essential feedback only."),
+    Off("Off", "Turn off all app animations.")
 }
 
-/** Recipe-specific roles that avoid one-off text styling in reading surfaces. */
+@Immutable
+object AppMotion {
+    const val state = 160
+    const val content = 200
+    const val screen = 240
+    const val editorial = 360
+    val standardEasing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)
+}
+
+/** Recipe-specific roles keep long-form reading surfaces consistent. */
 @Immutable
 data class RecipeTypeScale(
     val body: TextStyle,
@@ -56,17 +64,20 @@ data class RecipeTypeScale(
 
 val LocalRecipeTypeScale = staticCompositionLocalOf {
     RecipeTypeScale(
-        body = TextStyle(fontSize = 17.sp, lineHeight = 26.sp),
+        body = TextStyle(fontSize = 17.sp, lineHeight = 28.sp),
         ingredient = TextStyle(fontSize = 16.sp, lineHeight = 25.sp),
-        instruction = TextStyle(fontSize = 22.sp, lineHeight = 32.sp),
+        instruction = TextStyle(fontSize = 21.sp, lineHeight = 32.sp),
         quantity = TextStyle(fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
         metadata = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
-        sectionTitle = TextStyle(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold)
+        sectionTitle = TextStyle(fontSize = 22.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold)
     )
 }
 
+val LocalMotionMode = staticCompositionLocalOf { MotionMode.Standard }
 val LocalReducedMotion = staticCompositionLocalOf { false }
 
-@Composable
-fun systemReducedMotionEnabled(): Boolean =
-    !LocalInspectionMode.current && !ValueAnimator.areAnimatorsEnabled()
+/** The OS setting supplies the initial default; an explicit app choice can still be Off. */
+fun systemReducedMotionEnabled(): Boolean = !ValueAnimator.areAnimatorsEnabled()
+
+fun defaultMotionMode(): MotionMode =
+    if (systemReducedMotionEnabled()) MotionMode.Reduced else MotionMode.Standard
