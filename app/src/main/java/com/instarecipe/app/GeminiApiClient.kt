@@ -12,6 +12,11 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -53,19 +58,34 @@ internal data class GeminiFileDataDto(
 @Serializable
 internal data class GenerationConfigDto(
     val responseMimeType: String,
-    val temperature: Double
+    val responseJsonSchema: JsonObject,
+    val temperature: Double,
+    val maxOutputTokens: Int,
+    val thinkingConfig: ThinkingConfigDto
+)
+
+@Serializable
+internal data class ThinkingConfigDto(
+    val thinkingLevel: String
 )
 
 @Serializable
 internal data class GenerateContentResponseDto(
     val candidates: List<GeminiCandidateDto>? = null,
     @SerialName("output_text") val outputText: String? = null,
-    val output: List<LegacyOutputDto>? = null
+    val output: List<LegacyOutputDto>? = null,
+    val promptFeedback: GeminiPromptFeedbackDto? = null
 )
 
 @Serializable
 internal data class GeminiCandidateDto(
-    val content: GeminiContentDto? = null
+    val content: GeminiContentDto? = null,
+    val finishReason: String? = null
+)
+
+@Serializable
+internal data class GeminiPromptFeedbackDto(
+    val blockReason: String? = null
 )
 
 @Serializable
@@ -78,13 +98,17 @@ internal data class LegacyOutputDto(
 internal data class RecipePayloadDto(
     val title: String? = null,
     val creator: String? = null,
+    val dietType: String? = null,
     val category: String? = null,
     val tags: List<String>? = null,
     val ingredients: List<String>? = null,
     val steps: List<String>? = null,
+    @SerialName("instructions") val instructions: List<String>? = null,
     val prepTime: String? = null,
     val cookTime: String? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    val extractionStatus: String? = null,
+    val missingDetails: List<String>? = null
 )
 
 @Serializable
@@ -113,19 +137,34 @@ private data class GeminiErrorDto(
     val status: String? = null
 )
 
+@Serializable
+private data class GeminiModelDto(
+    val name: String? = null,
+    val supportedGenerationMethods: List<String> = emptyList()
+)
+
 internal class GeminiApiException(
     message: String,
     val mayTryBackupKey: Boolean
 ) : RuntimeException(message)
 
 internal class GeminiApiClient(
-    private val generationClient: OkHttpClient,
-    private val fileClient: OkHttpClient,
+    generationClient: OkHttpClient,
+    fileClient: OkHttpClient,
     private val apiRoot: HttpUrl = GOOGLE_API_ROOT,
     private val retryDelayMillis: Long = 1_000L,
     private val filePollDelayMillis: Long = 1_000L,
     private val maxFilePolls: Int = 90
 ) {
+    // Key fallback owns retries. Disable OkHttp's transparent 408/connection replay so the
+    // primary key cannot be retried behind our back before the backup key gets its turn.
+    private val generationClient = generationClient.newBuilder()
+        .retryOnConnectionFailure(false)
+        .build()
+    private val fileClient = fileClient.newBuilder()
+        .retryOnConnectionFailure(false)
+        .build()
+
     private data class UploadedFile(val name: String, val uri: String)
 
     suspend fun generateRecipe(
@@ -152,7 +191,10 @@ internal class GeminiApiClient(
                 contents = listOf(GeminiContentDto(parts)),
                 generationConfig = GenerationConfigDto(
                     responseMimeType = "application/json",
-                    temperature = 0.2
+                    responseJsonSchema = RECIPE_RESPONSE_SCHEMA,
+                    temperature = 0.1,
+                    maxOutputTokens = 4_096,
+                    thinkingConfig = ThinkingConfigDto(thinkingLevel = "low")
                 )
             )
             val responseBody = executeGenerationWithRetry(apiKey, requestBody, maxGenerationAttempts)
@@ -177,13 +219,21 @@ internal class GeminiApiClient(
     }
 
     suspend fun testConnection(apiKey: String) {
-        val body = GenerateContentRequestDto(
-            contents = listOf(GeminiContentDto(listOf(GeminiPartDto(text = "Respond with 'OK'"))))
-        )
-        val request = generationRequest(apiKey, body)
+        val request = Request.Builder()
+            .url(apiUrl("v1beta", "models", GeminiRecipeExtractor.GEMINI_MODEL))
+            .addHeader("x-goog-api-key", apiKey)
+            .get()
+            .build()
         generationClient.newCall(request).awaitResponse().use { response ->
             val responseBody = response.body.string()
             if (!response.isSuccessful) throw geminiHttpError(response.code, responseBody)
+            val model = decodeOrThrow<GeminiModelDto>(responseBody, "model capability")
+            if (model.name.isNullOrBlank() || "generateContent" !in model.supportedGenerationMethods) {
+                throw GeminiApiException(
+                    "Gemini 3.8 Flash is not enabled for recipe creation with this key.",
+                    mayTryBackupKey = true
+                )
+            }
         }
     }
 
@@ -351,13 +401,27 @@ internal class GeminiApiClient(
 
     private fun extractGeneratedText(rawResponse: String): String {
         val root = decodeOrThrow<GenerateContentResponseDto>(rawResponse, "generation response")
+        root.promptFeedback?.blockReason?.takeIf(String::isNotBlank)?.let { reason ->
+            throw IllegalStateException("Gemini blocked this Reel response ($reason).")
+        }
         return when {
-            root.candidates != null -> root.candidates.firstOrNull()
-                ?.content?.parts?.firstOrNull()?.text.orEmpty()
-            root.outputText != null -> root.outputText
+            root.candidates != null -> root.candidates.firstOrNull()?.let { candidate ->
+                if (candidate.finishReason.equals("SAFETY", ignoreCase = true) ||
+                    candidate.finishReason.equals("BLOCKLIST", ignoreCase = true)
+                ) {
+                    throw IllegalStateException("Gemini blocked this Reel response.")
+                }
+                candidate.content?.parts.orEmpty()
+                    .mapNotNull(GeminiPartDto::text)
+                    .joinToString(separator = "")
+                    .takeIf(String::isNotBlank)
+            } ?: throw RuntimeException("Gemini returned no recipe content.")
+            root.outputText != null -> root.outputText.takeIf(String::isNotBlank)
+                ?: throw RuntimeException("Gemini returned no recipe content.")
             root.output != null -> root.output.firstOrNull()?.let { output ->
                 output.text?.takeIf { it.isNotBlank() } ?: output.content.orEmpty()
-            }.orEmpty()
+            }?.takeIf(String::isNotBlank)
+                ?: throw RuntimeException("Gemini returned no recipe content.")
             else -> throw RuntimeException("Gemini returned an unsupported response format.")
         }
     }
@@ -373,17 +437,26 @@ internal class GeminiApiClient(
         body: String,
         operation: String? = null
     ): GeminiApiException {
-        val apiStatus = try {
-            GeminiJson.decodeFromString<GeminiErrorEnvelopeDto>(body).error?.status
+        val apiError = try {
+            GeminiJson.decodeFromString<GeminiErrorEnvelopeDto>(body).error
         } catch (_: SerializationException) {
             null
         }
+        val apiStatus = apiError?.status
+        val apiMessage = apiError?.message.orEmpty().lowercase()
         val message = when (apiStatus) {
-            "UNAUTHENTICATED", "PERMISSION_DENIED" -> "Gemini rejected the API key. Check the key in Settings."
+            "UNAUTHENTICATED", "PERMISSION_DENIED" -> when {
+                "leak" in apiMessage || "blocked" in apiMessage ->
+                    "Google blocked this Gemini key. Create a new Auth key in Google AI Studio."
+                "unrestricted" in apiMessage || "standard key" in apiMessage ->
+                    "This legacy Gemini key is no longer accepted. Create a new Auth key in Google AI Studio."
+                else ->
+                    "Gemini rejected this key. Use a current Auth key from Google AI Studio."
+            }
             "RESOURCE_EXHAUSTED" -> "Gemini rate limit reached. Please wait and try again."
             else -> when (statusCode) {
                 400 -> "Gemini rejected the extraction request. Try a shorter video or caption."
-                401, 403 -> "Gemini rejected the API key. Check the key in Settings."
+                401, 403 -> "Gemini rejected this key. Use a current Auth key from Google AI Studio."
                 404 -> "Gemini 3.8 Flash is not available for this API key."
                 408 -> "Gemini timed out while processing the request."
                 413 -> "The video is too large for Gemini to process."
@@ -394,7 +467,8 @@ internal class GeminiApiClient(
             }
         }
         val mayTryBackup = apiStatus in BACKUP_ELIGIBLE_API_STATUSES ||
-            statusCode == 401 || statusCode == 403 || statusCode == 404 || statusCode == 429 || statusCode in 500..599
+            statusCode == 408 || statusCode == 401 || statusCode == 403 ||
+            statusCode == 404 || statusCode == 429 || statusCode in 500..599
         return GeminiApiException(message, mayTryBackup)
     }
     private companion object {
@@ -405,7 +479,41 @@ internal class GeminiApiClient(
         const val CLEANUP_TIMEOUT_MILLIS = 5_000L
         val RETRYABLE_HTTP_CODES = setOf(408, 429, 500, 502, 503, 504)
         val BACKUP_ELIGIBLE_API_STATUSES = setOf(
-            "UNAUTHENTICATED", "PERMISSION_DENIED", "RESOURCE_EXHAUSTED", "UNAVAILABLE"
+            "UNAUTHENTICATED", "PERMISSION_DENIED", "RESOURCE_EXHAUSTED", "UNAVAILABLE",
+            "DEADLINE_EXCEEDED"
         )
+        val RECIPE_RESPONSE_SCHEMA = buildJsonObject {
+            put("type", "object")
+            put("additionalProperties", false)
+            put("properties", buildJsonObject {
+                listOf("title", "creator", "category", "prepTime", "cookTime", "notes").forEach { field ->
+                    put(field, buildJsonObject { put("type", "string") })
+                }
+                put("dietType", buildJsonObject {
+                    put("type", "string")
+                    put("enum", buildJsonArray {
+                        listOf("veg", "non_veg", "vegan", "unknown").forEach { add(JsonPrimitive(it)) }
+                    })
+                })
+                put("extractionStatus", buildJsonObject {
+                    put("type", "string")
+                    put("enum", buildJsonArray {
+                        listOf("complete", "partial", "no_recipe").forEach { add(JsonPrimitive(it)) }
+                    })
+                })
+                listOf("tags", "ingredients", "steps", "missingDetails").forEach { field ->
+                    put(field, buildJsonObject {
+                        put("type", "array")
+                        put("items", buildJsonObject { put("type", "string") })
+                    })
+                }
+            })
+            put("required", buildJsonArray {
+                listOf(
+                    "title", "creator", "dietType", "category", "tags", "ingredients", "steps",
+                    "prepTime", "cookTime", "notes", "extractionStatus", "missingDetails"
+                ).forEach { add(JsonPrimitive(it)) }
+            })
+        }
     }
 }

@@ -14,21 +14,26 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
@@ -47,11 +52,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,13 +67,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.instarecipe.app.ui.components.CookingModeDialog
+import com.instarecipe.app.ui.components.CookPhotoStore
 import com.instarecipe.app.ui.screens.MainScaffold
 import com.instarecipe.app.ui.screens.RecipeDetail
 import com.instarecipe.app.ui.screens.RecipeEditor
 import com.instarecipe.app.ui.theme.InstaRecipeTheme
+import com.instarecipe.app.ui.theme.MotionMode
 import com.instarecipe.app.ui.theme.ThemeMode
+import com.instarecipe.app.ui.theme.defaultMotionMode
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.LocalDate
 
@@ -85,14 +94,33 @@ internal object ThemePreferences {
 
     fun load(context: Context): ThemeMode {
         val saved = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
-            .getString(THEME_MODE, ThemeMode.System.name)
-        return ThemeMode.entries.firstOrNull { it.name == saved } ?: ThemeMode.System
+            .getString(THEME_MODE, ThemeMode.Light.name)
+        return ThemeMode.entries.firstOrNull { it.name == saved } ?: ThemeMode.Light
     }
 
     fun save(context: Context, mode: ThemeMode) {
         context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
             .edit()
             .putString(THEME_MODE, mode.name)
+            .apply()
+    }
+}
+
+internal object MotionPreferences {
+    private const val PREFERENCES = "instarecipe_appearance"
+    private const val MOTION_MODE = "motion_mode"
+
+    fun load(context: Context): MotionMode {
+        val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+        if (!preferences.contains(MOTION_MODE)) return defaultMotionMode()
+        val saved = preferences.getString(MOTION_MODE, null)
+        return MotionMode.entries.firstOrNull { it.name == saved } ?: defaultMotionMode()
+    }
+
+    fun save(context: Context, mode: MotionMode) {
+        context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+            .edit()
+            .putString(MOTION_MODE, mode.name)
             .apply()
     }
 }
@@ -126,10 +154,12 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-internal fun shouldQueueInstagramExtraction(recipes: List<Recipe>, targetUrl: String): Boolean =
-    recipes.none { recipe ->
-        recipe.sourceUrl.isNotBlank() && recipe.sourceUrl == targetUrl && recipe.status == RecipeStatus.Saved
+internal fun shouldQueueInstagramExtraction(recipes: List<Recipe>, targetUrl: String): Boolean {
+    val normalizedTarget = normalizedSourceUrl(targetUrl) ?: return true
+    return recipes.none { recipe ->
+        recipe.status == RecipeStatus.Saved && normalizedSourceUrl(recipe.sourceUrl) == normalizedTarget
     }
+}
 
 private fun Intent.extractSharePayload(): SharePayload? {
     if (action != Intent.ACTION_SEND) return null
@@ -160,53 +190,15 @@ private fun Intent.extractSharePayload(): SharePayload? {
 }
 
 internal enum class Tab(val label: String, val icon: ImageVector) {
-    Library("Cookbook", Icons.Default.Home),
+    Home("Recipes", Icons.AutoMirrored.Filled.MenuBook),
+    /** Kept only so previously saved activity state can be restored after upgrading. */
+    Explore("Explore", Icons.Default.Search),
+    Collections("Collections", Icons.AutoMirrored.Filled.MenuBook),
+    Saved("Saved", Icons.Default.Bookmark),
+    /** Imports own unfinished work, separately from reviewed recipes. */
     Inbox("Imports", Icons.Default.Inbox),
     Settings("Settings", Icons.Default.Settings)
 }
-
-private val recipeStateSaver = Saver<MutableState<Recipe?>, Bundle>(
-    save = { state ->
-        Bundle().apply {
-            state.value?.let { recipe ->
-                putBoolean("present", true)
-                putLong("id", recipe.id)
-                putString("title", recipe.title)
-                putString("sourceUrl", recipe.sourceUrl)
-                putString("creator", recipe.creator)
-                putString("category", recipe.category)
-                putStringArrayList("tags", ArrayList(recipe.tags))
-                putStringArrayList("ingredients", ArrayList(recipe.ingredients))
-                putStringArrayList("steps", ArrayList(recipe.steps))
-                putString("notes", recipe.notes)
-                putBoolean("favorite", recipe.favorite)
-                putBoolean("cooked", recipe.cooked)
-                putString("status", recipe.status.name)
-                putString("savedDate", recipe.savedDate)
-            }
-        }
-    },
-    restore = { bundle ->
-        mutableStateOf(
-            if (!bundle.getBoolean("present")) null else Recipe(
-                id = bundle.getLong("id"),
-                title = bundle.getString("title").orEmpty(),
-                sourceUrl = bundle.getString("sourceUrl").orEmpty(),
-                creator = bundle.getString("creator").orEmpty(),
-                category = bundle.getString("category").orEmpty(),
-                tags = bundle.getStringArrayList("tags").orEmpty(),
-                ingredients = bundle.getStringArrayList("ingredients").orEmpty(),
-                steps = bundle.getStringArrayList("steps").orEmpty(),
-                notes = bundle.getString("notes").orEmpty(),
-                favorite = bundle.getBoolean("favorite"),
-                cooked = bundle.getBoolean("cooked"),
-                status = runCatching { RecipeStatus.valueOf(bundle.getString("status").orEmpty()) }
-                    .getOrDefault(RecipeStatus.Draft),
-                savedDate = bundle.getString("savedDate").orEmpty()
-            )
-        )
-    }
-)
 
 @Composable
 private fun InstaRecipeApp(
@@ -217,77 +209,120 @@ private fun InstaRecipeApp(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var themeMode by remember { mutableStateOf(ThemePreferences.load(context)) }
+    var motionMode by remember { mutableStateOf(MotionPreferences.load(context)) }
     val recipes by viewModel.recipes.collectAsStateWithLifecycle()
+    val isLibraryLoading by viewModel.libraryLoading.collectAsStateWithLifecycle()
     val videoExtractionState by viewModel.videoExtractionState.collectAsStateWithLifecycle()
-    var selectedTab by rememberSaveable { mutableStateOf(Tab.Library) }
+    val instagramRetryPhases by viewModel.instagramRetryPhases.collectAsStateWithLifecycle()
+    val instagramRetryError by viewModel.instagramRetryError.collectAsStateWithLifecycle()
+    var selectedTab by rememberSaveable { mutableStateOf(Tab.Home) }
     var libraryFilterId by rememberSaveable { mutableStateOf("all") }
-    var editingRecipe by rememberSaveable(saver = recipeStateSaver) { mutableStateOf<Recipe?>(null) }
-    var viewingRecipe by rememberSaveable(saver = recipeStateSaver) { mutableStateOf<Recipe?>(null) }
-    var cookingRecipe by rememberSaveable(saver = recipeStateSaver) { mutableStateOf<Recipe?>(null) }
+    // Persist only route identity. Detail and cooking screens resolve the current Room row,
+    // while RecipeEditor owns its unsaved field draft through its own rememberSaveable state.
+    var editingRecipeId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var viewingRecipeId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var cookingRecipeId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var cookingServingScale by rememberSaveable { mutableStateOf(1.0f) }
+    var cookingCheckedIngredientsCsv by rememberSaveable { mutableStateOf("") }
+    var resumableCooking by remember { mutableStateOf(CookingSessions.load(context)) }
+    val mainStateHolder = rememberSaveableStateHolder()
+    var captureRecipe by remember { mutableStateOf<Recipe?>(null) }
+    var showCookPhotoOptions by remember { mutableStateOf(false) }
+    var pendingCookPhotoFile by remember { mutableStateOf<File?>(null) }
+    var cookPhotoError by remember { mutableStateOf<String?>(null) }
+    val retryingInstagramImportIds = instagramRetryPhases.keys
+    val blankRecipe = remember {
+        Recipe(
+            id = 0,
+            title = "",
+            sourceUrl = "",
+            creator = "",
+            category = "",
+            tags = emptyList(),
+            ingredients = emptyList(),
+            steps = emptyList(),
+            notes = "",
+            favorite = false,
+            cooked = false,
+            status = RecipeStatus.Draft,
+            savedDate = LocalDate.now().toString()
+        )
+    }
+    val currentEditingRecipe = editingRecipeId?.let { id ->
+        if (id == 0L) blankRecipe else recipes.firstOrNull { it.id == id }
+    }
+    val currentViewingRecipe = viewingRecipeId?.let { id -> recipes.firstOrNull { it.id == id } }
+    val currentCookingRecipe = cookingRecipeId?.let { id -> recipes.firstOrNull { it.id == id } }
+
+    LaunchedEffect(recipes, isLibraryLoading) {
+        if (isLibraryLoading) return@LaunchedEffect
+        if (editingRecipeId != null && editingRecipeId != 0L && currentEditingRecipe == null) {
+            editingRecipeId = null
+        }
+        if (viewingRecipeId != null && currentViewingRecipe == null) {
+            viewingRecipeId = null
+        }
+        if (cookingRecipeId != null && currentCookingRecipe == null) {
+            cookingRecipeId = null
+        }
+    }
 
     var extractionProgress by remember { mutableStateOf(ExtractionProgress()) }
-    var pendingSharePayload by remember { mutableStateOf<SharePayload?>(null) }
     var acceptedSharedText by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingReviewRecipeId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(initialSharePayload) {
-        if (initialSharePayload != null) pendingSharePayload = initialSharePayload
+        when (val incoming = initialSharePayload) {
+            is SharePayload.Text -> acceptedSharedText = incoming.content
+            is SharePayload.Video -> {
+                selectedTab = Tab.Inbox
+                viewModel.importSharedVideo(incoming.uri)
+                onShareHandled()
+            }
+            null -> Unit
+        }
+    }
+
+    LaunchedEffect(viewModel) {
+        viewModel.instagramRetryEffects.collect { effect ->
+            when (effect) {
+                InstagramRetryEffect.OpenSettings -> {
+                    viewingRecipeId = null
+                    selectedTab = Tab.Settings
+                }
+                is InstagramRetryEffect.OpenReview -> {
+                    pendingReviewRecipeId = effect.recipeId
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(pendingReviewRecipeId, recipes) {
+        val recipeId = pendingReviewRecipeId ?: return@LaunchedEffect
+        val candidate = recipes.firstOrNull { it.id == recipeId }
+        if (editingRecipeId == null && viewingRecipeId == null &&
+            candidate != null && candidate.status == RecipeStatus.Draft &&
+            INSTAGRAM_PROCESSING_TAG !in candidate.tags
+        ) {
+            viewingRecipeId = null
+            editingRecipeId = candidate.id
+            pendingReviewRecipeId = null
+        }
     }
 
     LaunchedEffect(videoExtractionState.completedRecipe?.id) {
         videoExtractionState.completedRecipe?.let { persisted ->
-            editingRecipe = persisted
+            pendingReviewRecipeId = persisted.id
             viewModel.acknowledgeCompletedVideoRecipe(persisted.id)
         }
     }
 
-    pendingSharePayload?.let { pending ->
-        AlertDialog(
-            onDismissRequest = {
-                pendingSharePayload = null
-                onShareHandled()
-            },
-            title = { Text("Import shared recipe?") },
-            text = {
-                Text(
-                    when (pending) {
-                        is SharePayload.Text ->
-                            "InstaRecipe will read the shared link and create an editable recipe from its caption or video."
-                        is SharePayload.Video ->
-                            "InstaRecipe will temporarily upload this video to create an editable recipe."
-                    }
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        when (pending) {
-                            is SharePayload.Text -> acceptedSharedText = pending.content
-                            is SharePayload.Video -> {
-                                selectedTab = Tab.Inbox
-                                viewModel.importSharedVideo(pending.uri)
-                                onShareHandled()
-                            }
-                        }
-                        pendingSharePayload = null
-                    }
-                ) { Text("Continue") }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        pendingSharePayload = null
-                        onShareHandled()
-                    }
-                ) { Text("Cancel") }
-            }
-        )
-    }
-
-    BackHandler(enabled = cookingRecipe != null || editingRecipe != null || viewingRecipe != null) {
+    BackHandler(enabled = editingRecipeId == null && (cookingRecipeId != null || viewingRecipeId != null || selectedTab != Tab.Home)) {
         when {
-            cookingRecipe != null -> cookingRecipe = null
-            editingRecipe != null -> editingRecipe = null
-            viewingRecipe != null -> viewingRecipe = null
+            cookingRecipeId != null -> cookingRecipeId = null
+            editingRecipeId != null -> editingRecipeId = null
+            viewingRecipeId != null -> viewingRecipeId = null
+            selectedTab != Tab.Home -> selectedTab = Tab.Home
         }
     }
 
@@ -302,11 +337,66 @@ private fun InstaRecipeApp(
         if (uri != null) viewModel.importGalleryVideo(uri)
     }
 
-    // Process accepted text shares; video shares transfer to the ViewModel synchronously on acceptance.
-    LaunchedEffect(acceptedSharedText) {
-        val sharedText = acceptedSharedText ?: return@LaunchedEffect
+    fun markCooked(recipe: Recipe) {
+        if (recipe.cooked) {
+            viewModel.update(recipe.id) { copy(cooked = false, cookedAt = null) }
+        } else {
+            val cookedDate = LocalDate.now().toString()
+            viewModel.update(recipe.id) { copy(cooked = true, cookedAt = cookedDate) }
+            captureRecipe = recipe.copy(cooked = true, cookedAt = cookedDate)
+        }
+    }
 
-        val targetUrl = InstagramResolver.extractInstagramUrl(sharedText)
+    fun persistCookPhoto(recipe: Recipe, copyPhoto: suspend () -> String?) {
+        coroutineScope.launch {
+            val savedPath = withContext(Dispatchers.IO) { copyPhoto() }
+            if (savedPath == null) {
+                cookPhotoError = "We couldn't save that photo. Try another image or take it again."
+                return@launch
+            }
+            val oldPath = recipe.cookPhotoPath
+            val cookedDate = recipe.cookedAt ?: LocalDate.now().toString()
+            viewModel.update(recipe.id) {
+                copy(cooked = true, cookedAt = cookedDate, cookPhotoPath = savedPath)
+            }
+            if (oldPath.isNotBlank() && oldPath != savedPath) {
+                withContext(Dispatchers.IO) { CookPhotoStore.delete(oldPath) }
+            }
+            captureRecipe = null
+        }
+    }
+
+    val chooseCookPhotoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        captureRecipe?.let { recipe ->
+            if (uri != null) persistCookPhoto(recipe) { CookPhotoStore.copyFromUri(context, uri) }
+        }
+    }
+
+    val takeCookPhotoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { captured ->
+        val file = pendingCookPhotoFile
+        pendingCookPhotoFile = null
+        captureRecipe?.let { recipe ->
+            if (captured && file != null) {
+                persistCookPhoto(recipe) {
+                    CookPhotoStore.copyFromFile(context, file).also { file.delete() }
+                }
+            } else {
+                file?.delete()
+            }
+        }
+    }
+
+    // Process accepted text shares; video shares transfer to the ViewModel synchronously on acceptance.
+    LaunchedEffect(acceptedSharedText, editingRecipeId) {
+        val sharedText = acceptedSharedText ?: return@LaunchedEffect
+        // Queue an incoming share while the editor owns an unsaved draft.
+        if (editingRecipeId != null) return@LaunchedEffect
+
+        val targetUrl = recipeImportUrl(sharedText)
         if (targetUrl == null) {
             extractionProgress = ExtractionProgress(
                 error = "The shared text does not contain a valid HTTPS Instagram post or reel link."
@@ -317,8 +407,24 @@ private fun InstaRecipeApp(
         }
 
         // Saved recipes are deduplicated; failed/pending drafts may be reclaimed by WorkManager.
-        if (!shouldQueueInstagramExtraction(recipes, targetUrl)) {
-            selectedTab = Tab.Library
+        val existingRecipe = try {
+            viewModel.findBySourceUrl(targetUrl)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            extractionProgress = ExtractionProgress(error = "Couldn't check your saved links. Try the import again.")
+            onShareHandled()
+            acceptedSharedText = null
+            return@LaunchedEffect
+        }
+        if (existingRecipe != null) {
+            if (existingRecipe.isCookbookReady()) {
+                selectedTab = Tab.Home
+                viewingRecipeId = existingRecipe.id
+            } else {
+                selectedTab = Tab.Inbox
+                if (!TagNormalizer.matches(existingRecipe.tags, INSTAGRAM_PROCESSING_TAG)) editingRecipeId = existingRecipe.id
+            }
             onShareHandled()
             acceptedSharedText = null
             return@LaunchedEffect
@@ -332,7 +438,7 @@ private fun InstaRecipeApp(
                 title = "Instagram Recipe Draft",
                 sourceUrl = targetUrl,
                 creator = "",
-                category = "Saved to try",
+                category = "Other",
                 tags = listOf("Instagram", "Needs review"),
                 ingredients = emptyList(),
                 steps = emptyList(),
@@ -343,20 +449,20 @@ private fun InstaRecipeApp(
                 savedDate = LocalDate.now().toString()
             )
             try {
-                viewModel.upsertAndAwait(draft)
+                viewModel.keepLinkDraft(draft)
                 onShareHandled()
                 extractionProgress = ExtractionProgress(
                     isExtracting = false,
-                    error = "A Gemini API key is required for AI extraction. Add a primary or backup key in Settings."
+                    error = "Your link is kept in Imports. Connect your Gemini key in Settings, then try the link again."
                 )
                 acceptedSharedText = null
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 extractionProgress = ExtractionProgress(
-                    error = "The shared recipe could not be saved. Tap Continue to retry."
+                    error = "The shared recipe could not be saved. Try the import again."
                 )
-                pendingSharePayload = SharePayload.Text(sharedText)
+                onShareHandled()
                 acceptedSharedText = null
             }
             return@LaunchedEffect
@@ -375,48 +481,52 @@ private fun InstaRecipeApp(
             throw cancelled
         } catch (_: Exception) {
             extractionProgress = ExtractionProgress(
-                error = "Background extraction could not be scheduled. Tap Continue to retry."
+                error = "Background extraction could not be scheduled. Try the import again."
             )
-            pendingSharePayload = SharePayload.Text(sharedText)
+            onShareHandled()
             acceptedSharedText = null
         }
     }
 
-    val displayedExtractionProgress = if (
-        videoExtractionState.progress.isExtracting || videoExtractionState.progress.error != null
-    ) {
-        videoExtractionState.progress
-    } else {
-        extractionProgress
+    val displayedExtractionProgress = when {
+        videoExtractionState.progress.isExtracting || videoExtractionState.progress.error != null ->
+            videoExtractionState.progress
+        instagramRetryError != null -> ExtractionProgress(error = instagramRetryError?.message)
+        else -> extractionProgress
     }
 
-    InstaRecipeTheme(themeMode = themeMode) {
+    InstaRecipeTheme(themeMode = themeMode, motionMode = motionMode) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             when {
-                editingRecipe != null -> RecipeEditor(
-                    recipe = editingRecipe,
-                    onCancel = { editingRecipe = null },
+                currentEditingRecipe != null -> RecipeEditor(
+                    recipe = currentEditingRecipe,
+                    onCancel = { editingRecipeId = null },
                     onSave = { saved ->
-                        viewModel.upsert(saved) { persisted ->
-                            editingRecipe = null
-                            viewingRecipe = persisted
+                        val persisted = viewModel.upsertAndAwait(saved)
+                        editingRecipeId = null
+                        if (persisted.status == RecipeStatus.Draft) {
+                            viewingRecipeId = null
+                            selectedTab = Tab.Inbox
+                        } else {
+                            viewingRecipeId = persisted.id
                         }
                     },
-                    onTriggerAiExtraction = { url, notes, onResult ->
-                        coroutineScope.launch {
+                    onTriggerAiExtraction = { url, notes ->
                             extractionProgress = ExtractionProgress(
                                 isExtracting = true,
                                 stage = "Extracting recipe details..."
                             )
                             var resolutionFile: File? = null
                             try {
-                                val cleanUrl = InstagramResolver.extractInstagramUrl(url)
+                                val cleanUrl = recipeImportUrl(url)
                                     ?: throw IllegalArgumentException("Enter a valid HTTPS Instagram post or reel link.")
                                 val customResolver = GeminiRecipeExtractor.getCustomResolver(context).ifBlank { null }
+                                val instagramProfile = GeminiRecipeExtractor.getInstagramProfileUrl(context).ifBlank { null }
                                 val resolution = InstagramResolver.resolveAndDownload(
                                     context = context,
                                     instagramUrl = cleanUrl,
                                     customResolverUrl = customResolver,
+                                    preferredProfileUrl = instagramProfile,
                                     supplementaryText = notes
                                 )
                                 resolutionFile = resolution.videoFile
@@ -430,57 +540,68 @@ private fun InstaRecipeApp(
                                     sourceUrl = cleanUrl,
                                     creatorName = resolution.creator
                                 )
-                                onResult(Result.success(extracted))
                                 extractionProgress = ExtractionProgress(isExtracting = false)
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (e: Exception) {
-                                onResult(Result.failure(e))
-                                extractionProgress = ExtractionProgress(
-                                    isExtracting = false,
-                                    error = "Couldn't create recipe: ${e.message}"
-                                )
+                                extracted
                             } finally {
+                                extractionProgress = ExtractionProgress(isExtracting = false)
                                 resolutionFile?.delete()
                                 InstagramResolver.cleanCachedReelVideos(context)
                             }
-                        }
                     }
                 )
 
-                viewingRecipe != null -> RecipeDetail(
-                    recipe = viewingRecipe!!,
-                    onBack = { viewingRecipe = null },
-                    onEdit = { editingRecipe = viewingRecipe },
+                currentViewingRecipe != null -> RecipeDetail(
+                    recipe = currentViewingRecipe,
+                    hasCookingSession = resumableCooking?.recipeId == currentViewingRecipe.id,
+                    onBack = { viewingRecipeId = null },
+                    onEdit = { editingRecipeId = currentViewingRecipe.id },
                     onDelete = {
-                        viewModel.delete(viewingRecipe!!.id)
-                        viewingRecipe = null
+                        viewModel.delete(currentViewingRecipe.id)
+                        viewingRecipeId = null
                     },
                     onToggleFavorite = {
-                        val updated = viewingRecipe!!.copy(favorite = !viewingRecipe!!.favorite)
+                        val updated = currentViewingRecipe.copy(favorite = !currentViewingRecipe.favorite)
                         viewModel.upsert(updated)
-                        viewingRecipe = updated
                     },
                     onToggleCooked = {
-                        val updated = viewingRecipe!!.copy(cooked = !viewingRecipe!!.cooked)
-                        viewModel.upsert(updated)
-                        viewingRecipe = updated
+                        markCooked(currentViewingRecipe)
                     },
-                    onStartCooking = { cookingRecipe = viewingRecipe },
+                    onStartCooking = { scale, checkedCsv ->
+                        cookingServingScale = scale
+                        cookingCheckedIngredientsCsv = checkedCsv
+                        cookingRecipeId = currentViewingRecipe.id
+                    },
+                    onRequestCookPhoto = { captureRecipe = currentViewingRecipe; showCookPhotoOptions = true },
+                    onRemoveCookPhoto = {
+                        val oldPath = currentViewingRecipe.cookPhotoPath
+                        viewModel.update(currentViewingRecipe.id) { copy(cookPhotoPath = "") }
+                        coroutineScope.launch(Dispatchers.IO) { CookPhotoStore.delete(oldPath) }
+                    },
+                    onRetryInstagramImport = if (currentViewingRecipe.canExtractFromLinkAgain()) {
+                        { viewModel.retryInstagramImport(currentViewingRecipe) }
+                    } else null,
+                    isRetryingInstagramImport = currentViewingRecipe.id in retryingInstagramImportIds,
+                    instagramRetryError = instagramRetryError
+                        ?.takeIf { it.recipeId == currentViewingRecipe.id }
+                        ?.message,
+                    onDismissInstagramRetryError = viewModel::dismissInstagramRetryError,
                     onTagSelected = { tag ->
                         libraryFilterId = "tag:${TagNormalizer.key(tag)}"
-                        viewingRecipe = null
-                        selectedTab = Tab.Library
+                        viewingRecipeId = null
+                        selectedTab = Tab.Home
                     }
                 )
 
-                else -> MainScaffold(
+                else -> mainStateHolder.SaveableStateProvider("main-scaffold") {
+                    MainScaffold(
                     recipes = recipes,
                     selectedTab = selectedTab,
                     extractionProgress = displayedExtractionProgress,
                     onDismissError = {
                         if (videoExtractionState.progress.error != null) {
                             viewModel.dismissVideoExtractionError()
+                        } else if (instagramRetryError != null) {
+                            viewModel.dismissInstagramRetryError()
                         } else {
                             extractionProgress = extractionProgress.copy(error = null)
                         }
@@ -490,55 +611,103 @@ private fun InstaRecipeApp(
                     onLibraryFilterSelected = { libraryFilterId = it },
                     onTagSelected = { tag ->
                         libraryFilterId = "tag:${TagNormalizer.key(tag)}"
-                        selectedTab = Tab.Library
+                        selectedTab = Tab.Home
                     },
-                    onOpen = { viewingRecipe = it },
+                    onOpen = {
+                        if (it.belongsInImports()) editingRecipeId = it.id else viewingRecipeId = it.id
+                    },
                     onToggleFavorite = { recipe ->
                         viewModel.update(recipe.id) { copy(favorite = !favorite) }
                     },
                     onToggleCooked = { recipe ->
-                        viewModel.update(recipe.id) { copy(cooked = !cooked) }
+                        markCooked(recipe)
                     },
-                    onStartCooking = { recipe -> cookingRecipe = recipe },
+                    onStartCooking = { recipe ->
+                        if (recipe.isCookbookReady()) {
+                            cookingServingScale = 1.0f
+                            cookingCheckedIngredientsCsv = ""
+                            cookingRecipeId = recipe.id
+                        }
+                    },
                     onAdd = {
-                        editingRecipe = Recipe(
-                            id = 0,
-                            title = "",
-                            sourceUrl = "",
-                            creator = "",
-                            category = "Saved to try",
-                            tags = emptyList(),
-                            ingredients = emptyList(),
-                            steps = emptyList(),
-                            notes = "",
-                            favorite = false,
-                            cooked = false,
-                            status = RecipeStatus.Draft,
-                            savedDate = LocalDate.now().toString()
-                        )
+                        editingRecipeId = 0L
                     },
                     onImportVideo = { importVideoLauncher.launch("video/*") },
+                    onImportLink = { acceptedSharedText = it },
+                    onImportText = viewModel::importRecipeText,
+                    resumeRecipe = recipes.firstOrNull { it.id == resumableCooking?.recipeId && it.isCookbookReady() },
+                    isLibraryLoading = isLibraryLoading,
+                    onRetryInstagramImport = viewModel::retryInstagramImport,
+                    retryingInstagramImportIds = retryingInstagramImportIds,
+                    searchRecipeIds = viewModel::searchRecipeIds,
                     themeMode = themeMode,
                     onThemeModeChange = { selectedMode ->
                         themeMode = selectedMode
                         ThemePreferences.save(context, selectedMode)
+                    },
+                    motionMode = motionMode,
+                    onMotionModeChange = { selectedMode ->
+                        motionMode = selectedMode
+                        MotionPreferences.save(context, selectedMode)
+                    }
+                    )
+                }
+            }
+
+            // Interactive Cooking Mode Overlay
+            currentCookingRecipe?.let { cookingRecipe ->
+                CookingModeDialog(
+                    recipeId = cookingRecipe.id,
+                    recipeTitle = cookingRecipe.title,
+                    steps = cookingRecipe.steps,
+                    ingredients = cookingRecipe.ingredients,
+                    initialServingScale = cookingServingScale,
+                    initialCheckedIngredientsCsv = cookingCheckedIngredientsCsv,
+                    onClose = { cookingRecipeId = null; resumableCooking = CookingSessions.load(context) },
+                    onFinishAndMarkCooked = {
+                        val cookedDate = LocalDate.now().toString()
+                        viewModel.update(cookingRecipe.id) { copy(cooked = true, cookedAt = cookedDate) }
+                        captureRecipe = cookingRecipe.copy(cooked = true, cookedAt = cookedDate)
                     }
                 )
             }
 
-            // Interactive Cooking Mode Overlay
-            if (cookingRecipe != null) {
-                CookingModeDialog(
-                    recipeTitle = cookingRecipe!!.title,
-                    steps = cookingRecipe!!.steps,
-                    ingredients = cookingRecipe!!.ingredients,
-                    onClose = { cookingRecipe = null },
-                    onFinishAndMarkCooked = {
-                        viewModel.update(cookingRecipe!!.id) { copy(cooked = true) }
-                        if (viewingRecipe?.id == cookingRecipe?.id) {
-                            viewingRecipe = viewingRecipe?.copy(cooked = true)
+            // Completion retains the optional capture context. Only an explicit photo action opens the chooser.
+            captureRecipe?.takeIf { showCookPhotoOptions }?.let { recipe ->
+                AlertDialog(
+                    onDismissRequest = { captureRecipe = null; showCookPhotoOptions = false },
+                    title = { Text("You made it.") },
+                    text = {
+                        Text(
+                            "Capture your cook for this private recipe shelf. It stays separate from the original recipe imagery."
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val file = CookPhotoStore.createCaptureFile(context)
+                                pendingCookPhotoFile = file
+                                takeCookPhotoLauncher.launch(CookPhotoStore.captureUri(context, file))
+                            }
+                        ) { Text("Take a photo") }
+                    },
+                    dismissButton = {
+                        Row {
+                            TextButton(onClick = { chooseCookPhotoLauncher.launch("image/*") }) {
+                                Text("Choose photo")
+                            }
+                            TextButton(onClick = { captureRecipe = null; showCookPhotoOptions = false }) { Text("Not now") }
                         }
                     }
+                )
+            }
+
+            cookPhotoError?.let { message ->
+                AlertDialog(
+                    onDismissRequest = { cookPhotoError = null },
+                    title = { Text("Photo not saved") },
+                    text = { Text(message) },
+                    confirmButton = { TextButton(onClick = { cookPhotoError = null }) { Text("OK") } }
                 )
             }
         }
@@ -559,37 +728,28 @@ internal fun CulinaryEmptyState(
         shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
-        Column(
-            modifier = Modifier.padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        Row(
+            modifier = Modifier.padding(24.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.Top
         ) {
             Box(
                 modifier = Modifier
-                    .size(64.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.Restaurant,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(32.dp)
+                    .size(width = 4.dp, height = 76.dp)
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Text(
-                title,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 22.sp
-            )
         }
     }
 }

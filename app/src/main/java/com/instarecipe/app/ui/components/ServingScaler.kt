@@ -18,9 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.instarecipe.app.ui.theme.DeepBasil
-import com.instarecipe.app.ui.theme.DeepBasilContainer
-import com.instarecipe.app.ui.theme.HerbMuted
 import java.math.BigDecimal
 import java.math.RoundingMode
 
@@ -47,6 +44,36 @@ object ServingScaler {
             .map { parseQuantity(it) ?: return trimmed }
             .joinToString("–") { value -> format(value * BigDecimal.valueOf(factor.toDouble())) }
         return "$scaledQuantity $rest".trim()
+    }
+
+    private val unitTokenRegex = Regex(
+        "^((?:g|kg|mg|ml|l|oz|lb|lbs|cup|cups|tbsp|tablespoons?|tsp|teaspoons?|cloves?|pinch|pinches|cans?|packets?|pieces?|slices?|medium|large|small|bunch|bunches|handfuls?|sprigs?)\\b\\.?\\s*)(.*)$",
+        RegexOption.IGNORE_CASE
+    )
+
+    /**
+     * Splits a scaled ingredient into (quantityAndUnit, description) so the UI can style quantities
+     * with editorial weight and accent color.
+     */
+    fun splitIngredientParts(ingredient: String): Pair<String?, String> {
+        val trimmed = ingredient.trim()
+        val match = quantityRegex.find(trimmed) ?: return null to trimmed
+        val numberPart = match.groupValues[1].trim()
+        val rest = match.groupValues[2].trim()
+        if (rest.isEmpty()) return null to trimmed
+
+        val unitMatch = unitTokenRegex.find(rest)
+        return if (unitMatch != null) {
+            val unit = unitMatch.groupValues[1].trim()
+            val remainder = unitMatch.groupValues[2].trim()
+            if (remainder.isNotEmpty()) {
+                "$numberPart $unit" to remainder
+            } else {
+                numberPart to rest
+            }
+        } else {
+            numberPart to rest
+        }
     }
 
     private fun parseQuantity(raw: String): BigDecimal? {

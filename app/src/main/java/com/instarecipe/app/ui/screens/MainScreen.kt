@@ -1,7 +1,13 @@
 package com.instarecipe.app.ui.screens
 
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -9,9 +15,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,15 +28,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -40,8 +50,7 @@ import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Restaurant
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Visibility
@@ -50,11 +59,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -69,8 +77,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,19 +92,31 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.instarecipe.app.ui.components.CategoryFilter
 import com.instarecipe.app.ui.components.CategoryFilterRow
 import com.instarecipe.app.ui.components.FilterIconType
+import com.instarecipe.app.ui.components.editorialChapterFor
+import com.instarecipe.app.ui.components.editorialShelfChapters
 import com.instarecipe.app.ui.components.ModernRecipeCard
-import com.instarecipe.app.ui.theme.DeepCoral
+import com.instarecipe.app.R
 import com.instarecipe.app.ui.theme.AppMotion
-import com.instarecipe.app.ui.theme.LocalReducedMotion
+import com.instarecipe.app.ui.theme.AppRadii
+import com.instarecipe.app.ui.theme.LocalMotionMode
+import com.instarecipe.app.ui.theme.MotionMode
 import com.instarecipe.app.ui.theme.ThemeMode
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import com.instarecipe.app.*
 
@@ -115,74 +137,59 @@ internal fun MainScaffold(
     onStartCooking: (Recipe) -> Unit,
     onAdd: () -> Unit,
     onImportVideo: () -> Unit,
+    onImportLink: (String) -> Unit,
+    onImportText: (String) -> Unit,
+    resumeRecipe: Recipe?,
+    isLibraryLoading: Boolean,
+    onRetryInstagramImport: (Recipe) -> Unit,
+    retryingInstagramImportIds: Set<Long>,
+    searchRecipeIds: (String) -> Flow<Set<Long>>,
     themeMode: ThemeMode,
-    onThemeModeChange: (ThemeMode) -> Unit
+    onThemeModeChange: (ThemeMode) -> Unit,
+    motionMode: MotionMode,
+    onMotionModeChange: (MotionMode) -> Unit
 ) {
-    val savedRecipes = remember(recipes) { recipes.filter { it.status == RecipeStatus.Saved } }
-    val draftRecipes = remember(recipes) { recipes.filter { it.status == RecipeStatus.Draft } }
-    val reducedMotion = LocalReducedMotion.current
-    val fabInteractionSource = remember { MutableInteractionSource() }
-    val isFabPressed by fabInteractionSource.collectIsPressedAsState()
+    val savedRecipes = remember(recipes) { recipes.filter(Recipe::isCookbookReady) }
+    val draftRecipes = remember(recipes) { recipes.filter(Recipe::belongsInImports) }
+    val primaryTabs = remember { listOf(Tab.Home, Tab.Inbox, Tab.Settings) }
+    val motion = LocalMotionMode.current
     var showAddSheet by rememberSaveable { mutableStateOf(false) }
+    val tabStates = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+    val context = LocalContext.current
+    val hasConnection = remember(selectedTab, recipes) { GeminiRecipeExtractor.getApiKeys(context).isNotEmpty() }
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == Tab.Explore || selectedTab == Tab.Collections || selectedTab == Tab.Saved) onTabSelected(Tab.Home)
+    }
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
+            TopAppBar(
                 title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.Restaurant,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Text(
-                            "InstaRecipe",
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                        Icon(
-                            Icons.Default.AutoAwesome,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(16.dp)
+                    Column {
+                        Text(selectedTab.label, style = MaterialTheme.typography.headlineSmall)
+                        if (selectedTab == Tab.Home) Text(
+                            "${savedRecipes.size} ${if (savedRecipes.size == 1) "recipe" else "recipes"}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
+                actions = {
+                    if (selectedTab != Tab.Settings) TextButton(onClick = { showAddSheet = true }, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Add recipe")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
             )
         },
-        floatingActionButton = {
-            if (selectedTab != Tab.Settings) {
-                ExtendedFloatingActionButton(
-                    onClick = { showAddSheet = true },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("Add recipe", fontWeight = FontWeight.SemiBold) },
-                    containerColor = if (isFabPressed) DeepCoral else MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shape = RoundedCornerShape(16.dp),
-                    interactionSource = fabInteractionSource
-                )
-            }
-        },
+        floatingActionButton = {},
         bottomBar = {
             NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 6.dp
+                tonalElevation = 0.dp
             ) {
-                Tab.entries.forEach { tab ->
+                primaryTabs.forEach { tab ->
                     val isSelected = selectedTab == tab
                     NavigationBarItem(
                         selected = isSelected,
@@ -190,15 +197,15 @@ internal fun MainScaffold(
                         icon = {
                             Icon(
                                 tab.icon,
-                                contentDescription = tab.label,
-                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                contentDescription = null,
+                                tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
                         label = {
                             Text(
-                                tab.label,
+                                if (tab == Tab.Inbox && draftRecipes.any { it.importStage(hasConnection) != ImportStage.Working }) "Imports (${draftRecipes.count { it.importStage(hasConnection) != ImportStage.Working }})" else tab.label,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
                         colors = NavigationBarItemDefaults.colors(
@@ -214,14 +221,14 @@ internal fun MainScaffold(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Live AI Extraction Progress Banner
+            // Import progress banner
             if (extractionProgress.isExtracting) {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 8.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(AppRadii.surface)
                 ) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -245,7 +252,7 @@ internal fun MainScaffold(
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 8.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(AppRadii.surface)
                 ) {
                     Row(
                         modifier = Modifier.padding(14.dp),
@@ -269,8 +276,10 @@ internal fun MainScaffold(
             AnimatedContent(
                 targetState = selectedTab,
                 transitionSpec = {
-                    if (reducedMotion) {
+                    if (motion == MotionMode.Off) {
                         fadeIn(snap()) togetherWith fadeOut(snap())
+                    } else if (motion == MotionMode.Reduced) {
+                        fadeIn(tween(80)) togetherWith fadeOut(tween(80))
                     } else {
                         fadeIn(tween(AppMotion.content, easing = AppMotion.standardEasing)) togetherWith
                             fadeOut(tween(AppMotion.state, easing = AppMotion.standardEasing))
@@ -278,282 +287,104 @@ internal fun MainScaffold(
                 },
                 label = "tab content",
                 modifier = Modifier.weight(1f)
-            ) { activeTab -> when (activeTab) {
-                Tab.Library -> LibraryTabScreen(
-                    recipes = savedRecipes,
-                    selectedFilterId = libraryFilterId,
-                    onFilterSelected = onLibraryFilterSelected,
-                    onOpen = onOpen,
-                    onToggleFavorite = onToggleFavorite,
-                    onToggleCooked = onToggleCooked,
-                    onStartCooking = onStartCooking,
-                    onTagSelected = onTagSelected
-                )
-
-                Tab.Inbox -> InboxTabScreen(
-                    drafts = draftRecipes,
-                    onOpen = onOpen,
-                    onToggleFavorite = onToggleFavorite,
-                    onToggleCooked = onToggleCooked,
-                    onStartCooking = onStartCooking,
-                    onImportVideo = onImportVideo,
-                    onTagSelected = onTagSelected
-                )
-
-                Tab.Settings -> SettingsScreen(
-                    themeMode = themeMode,
-                    onThemeModeChange = onThemeModeChange
-                )
+            ) { activeTab -> tabStates.SaveableStateProvider(activeTab.name) {
+                when (activeTab) {
+                    Tab.Home, Tab.Explore, Tab.Collections, Tab.Saved -> RecipeLibraryScreen(
+                        recipes = savedRecipes, draftCount = draftRecipes.size,
+                        selectedFilterId = libraryFilterId, onFilterSelected = onLibraryFilterSelected,
+                        onOpen = onOpen, onToggleFavorite = onToggleFavorite, onToggleCooked = onToggleCooked,
+                        onStartCooking = onStartCooking, onTagSelected = onTagSelected,
+                        onOpenImports = { onTabSelected(Tab.Inbox) }, onAdd = { showAddSheet = true },
+                        searchRecipeIds = searchRecipeIds, resumeRecipe = resumeRecipe, isLoading = isLibraryLoading
+                    )
+                    Tab.Inbox -> ImportsScreen(
+                        drafts = draftRecipes, hasConnection = hasConnection,
+                        retryingIds = retryingInstagramImportIds, onOpen = onOpen,
+                        onSettings = { onTabSelected(Tab.Settings) }, onRetry = onRetryInstagramImport,
+                        onAdd = { showAddSheet = true }, isLoading = isLibraryLoading
+                    )
+                    Tab.Settings -> SettingsScreen(themeMode, onThemeModeChange, motionMode, onMotionModeChange)
+                }
             } }
+
         }
     }
 
     if (showAddSheet) {
-        ModalBottomSheet(onDismissRequest = { showAddSheet = false }) {
-            Column(
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text("Add a recipe", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text(
-                    "Share a cooking Reel to InstaRecipe, choose a saved video, or enter a recipe yourself.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Button(
-                    onClick = {
-                        showAddSheet = false
-                        onImportVideo()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.PlayCircle, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("Choose a saved video")
-                }
-                OutlinedButton(
-                    onClick = {
-                        showAddSheet = false
-                        onAdd()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("Enter manually or paste a link")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LibraryTabScreen(
-    recipes: List<Recipe>,
-    selectedFilterId: String,
-    onFilterSelected: (String) -> Unit,
-    onOpen: (Recipe) -> Unit,
-    onToggleFavorite: (Recipe) -> Unit,
-    onToggleCooked: (Recipe) -> Unit,
-    onStartCooking: (Recipe) -> Unit,
-    onTagSelected: (String) -> Unit
-) {
-    var query by rememberSaveable { mutableStateOf("") }
-    val searchIndex = remember(recipes) { buildRecipeSearchIndex(recipes) }
-    val searchedRecipes = remember(query, searchIndex) {
-        if (query.isBlank()) recipes else searchRecipes(searchIndex, query)
-    }
-    val filters = remember(recipes) {
-        val builtIns = listOf(
-            CategoryFilter("all", "All"),
-            CategoryFilter("favorites", "Favorites", FilterIconType.Favorite),
-            CategoryFilter("quick", "Quick (<20m)", FilterIconType.Timer),
-            CategoryFilter("protein", "High Protein"),
-            CategoryFilter("veg", "Vegetarian"),
-            CategoryFilter("cooked", "Cooked", FilterIconType.Check)
+        AddRecipeSheet(
+            onDismiss = { showAddSheet = false }, onImportLink = onImportLink,
+            onImportText = onImportText, onImportVideo = onImportVideo, onWriteRecipe = onAdd,
+            hasConnection = hasConnection,
+            onSettings = { showAddSheet = false; onTabSelected(Tab.Settings) }
         )
-        val builtInKeys = setOf("quick", "high protein", "vegetarian")
-        val tagFilters = TagNormalizer.normalizeAll(recipes.flatMap { it.tags })
-            .filterNot { TagNormalizer.key(it) in builtInKeys }
-            .sortedBy { it.lowercase() }
-            .map { CategoryFilter("tag:${TagNormalizer.key(it)}", it) }
-        builtIns + tagFilters
-    }
-
-    val filteredRecipes = remember(selectedFilterId, searchedRecipes) {
-        when (selectedFilterId) {
-            "all" -> searchedRecipes
-            "favorites" -> searchedRecipes.filter { it.favorite }
-            "quick" -> searchedRecipes.filter(::isQuickRecipe)
-            "protein" -> searchedRecipes.filter { recipe ->
-                TagNormalizer.matches(recipe.tags, "High Protein")
-            }
-            "veg" -> searchedRecipes.filter { recipe ->
-                TagNormalizer.matches(recipe.tags, "Vegetarian")
-            }
-            "cooked" -> searchedRecipes.filter { it.cooked }
-            else -> if (selectedFilterId.startsWith("tag:")) {
-                val tagKey = selectedFilterId.removePrefix("tag:")
-                searchedRecipes.filter { recipe -> recipe.tags.any { TagNormalizer.key(it) == tagKey } }
-            } else {
-                searchedRecipes.filter { it.category.equals(selectedFilterId, ignoreCase = true) }
-            }
-        }
-    }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 112.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            Column(modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp)) {
-                Text(
-                    "My Cookbook",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "${recipes.size} saved ${if (recipes.size == 1) "recipe" else "recipes"} ready to cook",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Search recipes or ingredients") },
-                    singleLine = true,
-                    shape = MaterialTheme.shapes.medium
-                )
-            }
-        }
-
-        // Horizontal Category Filter Pills
-        item {
-            CategoryFilterRow(
-                filters = filters,
-                selectedFilterId = selectedFilterId,
-                onFilterSelected = onFilterSelected
-            )
-        }
-
-        if (filteredRecipes.isEmpty()) {
-            item {
-                CulinaryEmptyState(
-                    title = if (selectedFilterId == "all") "Your Cookbook is Fresh" else "No matching recipes",
-                    message = if (selectedFilterId == "all") {
-                        "Share a cooking Reel or choose a saved video to create your first recipe."
-                    } else {
-                        "Try another search or switch back to All."
-                    }
-                )
-            }
-        } else {
-            items(filteredRecipes, key = { it.id }, contentType = { "recipe-card" }) { recipe ->
-                Box(modifier = Modifier.padding(horizontal = 20.dp)) {
-                    ModernRecipeCard(
-                        recipe = recipe,
-                        onOpen = { onOpen(recipe) },
-                        onToggleFavorite = { onToggleFavorite(recipe) },
-                        onToggleCooked = { onToggleCooked(recipe) },
-                        onStartCooking = { onStartCooking(recipe) },
-                        onTagClick = onTagSelected
-                    )
-                }
-            }
-        }
     }
 }
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun InboxTabScreen(
-    drafts: List<Recipe>,
-    onOpen: (Recipe) -> Unit,
-    onToggleFavorite: (Recipe) -> Unit,
-    onToggleCooked: (Recipe) -> Unit,
-    onStartCooking: (Recipe) -> Unit,
-    onImportVideo: () -> Unit,
-    onTagSelected: (String) -> Unit
+private fun InstagramLoginDialog(
+    onDismiss: () -> Unit,
+    onLoginSuccess: (String?) -> Unit
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, top = 14.dp, end = 20.dp, bottom = 112.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            Column {
-                Text(
-                    "Imports",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "Recipes being created or waiting for your review.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
+    var loading by remember { mutableStateOf(true) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Link Instagram profile") },
+        text = {
+            Box(Modifier.fillMaxWidth().height(560.dp)) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { context ->
+                        WebView(context).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.allowFileAccess = false
+                            settings.allowContentAccess = false
+                            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                            CookieManager.getInstance().setAcceptCookie(true)
+                            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                            webViewClient = object : WebViewClient() {
+                                private fun checkSession() {
+                                    val cookies = CookieManager.getInstance().getCookie("https://www.instagram.com")
+                                    if (!cookies.isNullOrBlank() && cookies.contains("sessionid=") && cookies.contains("ds_user_id=")) {
+                                        CookieManager.getInstance().flush()
+                                        onLoginSuccess(InstagramSessionManager.extractCookieValue(cookies, "ds_user_id"))
+                                    }
+                                }
 
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Column {
-                        Text("Create from a saved video", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Text(
-                            "Choose a cooking video and InstaRecipe will turn it into an editable recipe.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    Button(
-                        onClick = onImportVideo,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.PlayCircle, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.size(4.dp))
-                        Text("Choose video")
-                    }
-                }
-            }
-        }
+                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                    val host = request?.url?.host.orEmpty().lowercase()
+                                    return !(request?.url?.scheme == "https" && (host == "instagram.com" || host.endsWith(".instagram.com")))
+                                }
 
-        if (drafts.isEmpty()) {
-            item {
-                CulinaryEmptyState(
-                    title = "Nothing waiting for review",
-                    message = "Share a cooking Reel to InstaRecipe or choose a saved video to get started."
+                                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                    loading = true
+                                    checkSession()
+                                }
+
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    loading = false
+                                    checkSession()
+                                }
+                            }
+                            loadUrl("https://www.instagram.com/accounts/login/")
+                        }
+                    }
                 )
+                if (loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
             }
-        } else {
-            items(drafts, key = { it.id }, contentType = { "recipe-card" }) { draft ->
-                ModernRecipeCard(
-                    recipe = draft,
-                    onOpen = { onOpen(draft) },
-                    onToggleFavorite = { onToggleFavorite(draft) },
-                    onToggleCooked = { onToggleCooked(draft) },
-                    onStartCooking = { onStartCooking(draft) },
-                    onTagClick = onTagSelected
-                )
-            }
-        }
-    }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SettingsScreen(
     themeMode: ThemeMode,
-    onThemeModeChange: (ThemeMode) -> Unit
+    onThemeModeChange: (ThemeMode) -> Unit,
+    motionMode: MotionMode,
+    onMotionModeChange: (MotionMode) -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -562,21 +393,39 @@ private fun SettingsScreen(
     var backupApiKey by remember { mutableStateOf(GeminiRecipeExtractor.getBackupApiKey(context)) }
     var showApiKey by rememberSaveable { mutableStateOf(false) }
     var customResolver by remember { mutableStateOf(GeminiRecipeExtractor.getCustomResolver(context)) }
+    var instagramProfile by remember { mutableStateOf(GeminiRecipeExtractor.getInstagramProfileUrl(context)) }
 
     var storageCleanedNotice by remember { mutableStateOf<String?>(null) }
 
     var testStatus by remember { mutableStateOf<String?>(null) }
     var isTesting by remember { mutableStateOf(false) }
     var advancedExpanded by rememberSaveable { mutableStateOf(false) }
+    var instagramConnected by remember { mutableStateOf(InstagramSessionManager.isLoggedIn(context)) }
+    var instagramUserId by remember { mutableStateOf(InstagramSessionManager.getUserId(context)) }
+    var showInstagramLogin by rememberSaveable { mutableStateOf(false) }
+
+    if (showInstagramLogin) {
+        InstagramLoginDialog(
+            onDismiss = { showInstagramLogin = false },
+            onLoginSuccess = { userId ->
+                instagramConnected = true
+                instagramUserId = userId
+                showInstagramLogin = false
+            }
+        )
+    }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().imePadding(),
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("Choose your appearance and connect recipe creation.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("PREFERENCES", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.1.sp), color = MaterialTheme.colorScheme.primary)
+                Text("Make it yours", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text("Appearance, recipe imports and local storage.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
 
         item {
@@ -608,20 +457,61 @@ private fun SettingsScreen(
             }
         }
 
-        // Gemini AI Section
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                shape = RoundedCornerShape(20.dp),
+                shape = MaterialTheme.shapes.large,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Motion: ${motionMode.label}", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        motionMode.description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        MotionMode.entries.forEach { mode ->
+                            FilterChip(
+                                selected = motionMode == mode,
+                                onClick = { onMotionModeChange(mode) },
+                                label = { Text(mode.label) },
+                                leadingIcon = if (motionMode == mode) {
+                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                } else null,
+                                modifier = Modifier.semantics {
+                                    stateDescription = if (motionMode == mode) "Selected" else "Not selected"
+                                }
+                            )
+                        }
+                    }
+                    Text(
+                        "Motion follows the system setting until you choose a mode here. Reduced and Off also apply to cooking and future promotional surfaces.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // Recipe import connection
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(AppRadii.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Text("Recipe creation", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Text("Reel import connection", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
                     Text(
-                        "Your free key is tried first. If it times out, reaches its quota, or is unavailable, InstaRecipe uses your paid fallback key.",
+                        "Your primary Gemini key is tried first. If it is unavailable, InstaRecipe can use an optional backup key.",
                         style = MaterialTheme.typography.bodyMedium
                     )
 
@@ -630,7 +520,7 @@ private fun SettingsScreen(
                         onValueChange = {
                             apiKey = it
                         },
-                        label = { Text("Free key (primary)") },
+                        label = { Text("Primary Gemini Auth key") },
                         placeholder = { Text("AIzaSy...") },
                         leadingIcon = { Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         trailingIcon = {
@@ -651,8 +541,8 @@ private fun SettingsScreen(
                     OutlinedTextField(
                         value = backupApiKey,
                         onValueChange = { backupApiKey = it },
-                        label = { Text("Paid key (fallback)") },
-                        placeholder = { Text("Optional paid key") },
+                        label = { Text("Backup Gemini Auth key") },
+                        placeholder = { Text("Optional backup key") },
                         leadingIcon = { Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.secondary) },
                         trailingIcon = {
                             IconButton(onClick = { showApiKey = !showApiKey }) {
@@ -670,13 +560,13 @@ private fun SettingsScreen(
                     )
 
                     Text(
-                        "The paid key is used only when the free key is rejected, rate-limited, unavailable, or takes too long.",
+                        "The backup key is used only when the primary key is rejected, rate-limited, unavailable, or takes too long.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     Text(
-                        "Use current Auth keys from Google AI Studio. Keys stay encrypted on this device.",
+                        "Use current Auth keys from Google AI Studio; legacy Standard keys no longer work. Keys stay encrypted on this device.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -687,7 +577,56 @@ private fun SettingsScreen(
                         fontWeight = FontWeight.SemiBold
                     )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey"))
+                                        )
+                                    }
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Get key (AI Studio)")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    val pasted = clipboard?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()?.trim().orEmpty()
+                                    if (pasted.isBlank()) {
+                                        testStatus = "Clipboard is empty. Copy your Gemini Auth key first."
+                                    } else {
+                                        apiKey = pasted
+                                        isTesting = true
+                                        testStatus = null
+                                        coroutineScope.launch {
+                                            val res = GeminiRecipeExtractor.testConnections(pasted, backupApiKey)
+                                            if (res.isSuccess && !GeminiRecipeExtractor.setApiKeys(context, pasted, backupApiKey)) {
+                                                testStatus = "Connection worked, but the keys could not be encrypted on this device."
+                                                isTesting = false
+                                                return@launch
+                                            }
+                                            isTesting = false
+                                            testStatus = res.getOrElse { it.message ?: "Failed" }
+                                        }
+                                    }
+                                },
+                                enabled = !isTesting,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Paste & test")
+                            }
+                        }
                         OutlinedButton(
                             onClick = {
                                 testStatus = if (GeminiRecipeExtractor.setApiKeys(context, apiKey, backupApiKey)) {
@@ -697,7 +636,8 @@ private fun SettingsScreen(
                                 }
                             },
                             enabled = !isTesting,
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("Save")
                         }
@@ -718,7 +658,8 @@ private fun SettingsScreen(
                             },
                             enabled = (apiKey.isNotBlank() || backupApiKey.isNotBlank()) && !isTesting,
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             if (isTesting) {
                                 CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
@@ -759,6 +700,46 @@ private fun SettingsScreen(
         }
 
         item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(AppRadii.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Instagram access", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (instagramConnected) "Connected for personal Reel imports${instagramUserId?.let { " • user $it" }.orEmpty()}"
+                        else "Not connected. Public links may be blocked by Instagram's login wall.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (instagramConnected) {
+                        OutlinedButton(
+                            onClick = {
+                                InstagramSessionManager.clearSession(context)
+                                instagramConnected = false
+                                instagramUserId = null
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("Disconnect and clear session") }
+                    } else {
+                        Button(
+                            onClick = { showInstagramLogin = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("Link Instagram profile") }
+                    }
+                    Text(
+                        "This uses an app-private Instagram WebView session for your personal imports. You can disconnect at any time.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        item {
             TextButton(
                 onClick = { advancedExpanded = !advancedExpanded },
                 modifier = Modifier.fillMaxWidth()
@@ -768,11 +749,46 @@ private fun SettingsScreen(
         }
 
         if (advancedExpanded) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(AppRadii.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Instagram profile", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Save a public creator profile so supported resolvers can use it as context when a Reel link is shared.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = instagramProfile,
+                        onValueChange = {
+                            instagramProfile = it
+                            if (it.isBlank() || InstagramResolver.isInstagramProfileUrl(it)) {
+                                GeminiRecipeExtractor.setInstagramProfileUrl(context, it)
+                            }
+                        },
+                        label = { Text("Public profile link (optional)") },
+                        placeholder = { Text("https://www.instagram.com/creator") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    Text(
+                        "This does not sign in to Instagram or read private posts. It only helps a configured resolver identify the creator.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
         // Storage & Auto-Deletion Policy
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(AppRadii.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -812,7 +828,7 @@ private fun SettingsScreen(
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(AppRadii.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -853,7 +869,7 @@ private fun SettingsScreen(
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(AppRadii.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

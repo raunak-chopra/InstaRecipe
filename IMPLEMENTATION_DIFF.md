@@ -10,13 +10,13 @@ The security, data-integrity, networking, dependency, release-build, Gemini-mode
 
 | Area | Implemented state |
 | --- | --- |
-| Gemini | The only active model is `gemini-3.8-flash`. The first encrypted slot is the free primary key and the optional second slot is the paid fallback. Timeout, authentication/permission, quota, model-availability, and service-availability failures may use the paid key. Connection checks run concurrently with a 12-second deadline. Requests, generation responses, recipe payloads, Files API responses, and error envelopes use typed `kotlinx.serialization` DTOs. |
+| Gemini | The only active model is `gemini-3.8-flash`. The first encrypted slot is the primary Auth key and the optional second slot is the backup Auth key. Timeout, authentication/permission, quota, model-availability, and service-availability failures may use the backup key. Connection checks run concurrently with a 12-second deadline. Requests, generation responses, recipe payloads, Files API responses, and error envelopes use typed `kotlinx.serialization` DTOs. Recipe generation requests low thinking effort and a strict JSON schema. |
 | HTTP/coroutines | OkHttp calls suspend without blocking a dispatcher thread, cancel the underlying call, preserve `CancellationException`, use bounded same-model retries, and expose mapped errors rather than response bodies. Generation and large-file upload clients have separate bounded timeouts. Gemini owns its retry/fallback policy; WorkManager retries only non-Gemini resolver/network failures once. |
 | Gemini files | Videos use the Files API instead of inline Base64. Bounded best-effort remote deletion is attempted after success, failure, or coroutine cancellation in a non-cancellable cleanup block. |
 | Instagram privacy | Raw Instagram cookie/session access and the in-app WebView login flow were removed. There are no bundled community resolver endpoints. |
 | Resolver security | Custom resolvers must be HTTPS. Local, loopback, link-local, site-local, multicast, and IPv6 ULA destinations are rejected. Redirects are followed manually and revalidated on each hop. |
 | Video safety | Incoming shared videos must be `content://` URIs. Video MIME type, available storage, streaming size, and a 200 MB maximum are enforced; partial temporary files are deleted. |
-| Share intents | Externally shared text/video requires user confirmation before network or AI processing. Accepted Reel links enqueue unique, network-constrained WorkManager extraction. A processing draft is created or reclaimed, successful extraction replaces it and enters the Saved cookbook, and a failed draft can be re-shared to retry. Accepted video shares transfer synchronously to ViewModel ownership before the intent is cleared. Accepted intents are cleared to prevent replay, and text imports require a valid HTTPS Instagram URL. |
+| Share intents | Externally shared text/video requires user confirmation before network or AI processing. Accepted Reel links enqueue unique, network-constrained WorkManager extraction. A processing draft is created or reclaimed, successful extraction replaces it with a populated reviewable Draft in Imports, and only the editor’s explicit Save recipe action enters the cookbook. A failed draft can be re-shared to retry. Accepted video shares transfer synchronously to ViewModel ownership before the intent is cleared. Accepted intents are cleared to prevent replay, and text imports require a valid HTTPS Instagram URL. |
 | Room | Database v2 uses generated IDs, an explicit v1-to-v2 migration, a unique nullable normalized source URL, conflict-safe inserts, update-by-ID, exported schemas, and a migration instrumentation test. |
 | Architecture | `Recipe` models were extracted, storage is behind `RecipeStore`, and the ViewModel receives its repository through a factory instead of fetching a singleton internally. `MainActivity` now owns lifecycle/share orchestration while main, detail, and editor UI live in dedicated screen files. Gallery/shared-video extraction and its progress/error/completion state are owned by the ViewModel, survive Activity recreation, suppress duplicate starts, and retain the persisted result until UI acknowledgement. Persisted recipes propagate their generated Room IDs before editor/detail state is updated. Important recipe/cooking UI state is saveable. |
 | Secrets | Primary and optional backup Gemini keys use Android Keystore-backed encryption and are committed atomically. Plaintext legacy data is removed only after an encrypted round-trip succeeds, and settings report persistence failures. No committed key/session patterns were found in the closing scan. |
@@ -30,7 +30,7 @@ The security, data-integrity, networking, dependency, release-build, Gemini-mode
 | Planned item | Result | Difference / rationale |
 | --- | --- | --- |
 | Extract `MainScreen.kt`, `RecipeEditorScreen.kt`, and `RecipeDetailScreen.kt` from `MainActivity.kt` | **Implemented** | The scaffold/library/inbox/settings, detail, and editor composables now live in dedicated `ui/screens` files. `MainActivity.kt` is about 670 lines and retains lifecycle, share-intent, root-state, and root-composition responsibilities. |
-| Reduce OkHttp timeouts | **Implemented with adjustment** | Generation is bounded at 75 seconds total, key diagnostics at 12 seconds, and file upload at 5 minutes because videos cannot reliably use a blanket short limit. With two keys configured, each key receives one generation attempt so the paid fallback is not delayed by repeated free-key attempts. |
+| Reduce OkHttp timeouts | **Implemented with adjustment** | Generation is bounded at 55 seconds total, resolver metadata calls at 15 seconds, key diagnostics at 12 seconds, and file upload at 5 minutes because videos cannot reliably use a blanket short limit. With two keys configured, each key receives one generation attempt so the backup key is not delayed by repeated primary-key attempts. |
 | Preserve coroutine cancellation | **Implemented** | Network helpers, resolver/worker paths, and UI extraction launches explicitly rethrow cancellation. Best-effort remote cleanup intentionally runs non-cancellably. |
 | Replace manual `org.json` parsing with `kotlinx.serialization` | **Implemented** | Gemini request/response, recipe, file-upload/status, and error envelopes are typed. The API transport is injectable and covered by MockWebServer fixtures for success, malformed JSON, safe HTTP mapping, retry, cancellation, upload/polling, and remote cleanup. |
 | Add Gradle version catalog | **Implemented** | Plugins and libraries are referenced through `libs.versions.toml`. |
@@ -157,8 +157,8 @@ git diff --check
 
 Results:
 
-- The first encrypted key is explicitly presented and used as the free primary; the second is the optional paid fallback.
-- Key diagnostics run concurrently with a 12-second deadline. Generation and Files API timeouts, authentication/permission rejection, quota exhaustion, model unavailability, and Gemini service failures can hand off to the paid key.
+- The first encrypted key is explicitly presented and used as the primary Auth key; the second is the optional backup Auth key.
+- Key diagnostics run concurrently with a 12-second deadline. Generation and Files API timeouts, authentication/permission rejection, quota exhaustion, model unavailability, and Gemini service failures can hand off to the backup key.
 - When two keys are configured, each gets one generation attempt. Gemini failures do not receive an additional WorkManager retry; non-Gemini resolver/network failures retain one background retry.
 - Cookbook search is integrated into the primary screen, bottom navigation is reduced to Cookbook/Imports/Settings, Add recipe uses a focused choice sheet, recipe-card taps open details directly, and technical controls are collapsed under Advanced settings.
 - 35 JVM unit tests passed with zero failures, including generation-timeout and video-upload-timeout free-to-paid fallback regressions.
@@ -166,3 +166,59 @@ Results:
 - `git diff --check` passed; line-ending notices for the pre-existing mixed working tree remain non-blocking.
 - An independent reviewer found two blocking retry/fallback gaps. Both were repaired and re-reviewed with no blocking findings. This bounded follow-up is **Reviewed**, **Verified**, and **Accepted**.
 - Live-key, device, share-sheet, and visual screenshot verification remain pending because no emulator/device or production credentials were used.
+
+## Follow-up verification: one-tap Inbox retry and strict paid fallback
+
+Executed locally on 2026-09-15:
+
+```powershell
+.\gradlew.bat testDebugUnitTest compileDebugAndroidTestKotlin
+.\gradlew.bat lintDebug assembleDebug
+git diff --check
+```
+
+Results:
+
+- Failed Instagram import cards now expose a full-width **Import from link again** action. It replaces the previous unique WorkManager job and reuses the original shared caption without the appended failure notice.
+- HTTP 408 and `DEADLINE_EXCEEDED` are paid-fallback eligible. OkHttp transparent connection/408 replay is disabled for Gemini calls so the app-level free-then-paid order owns every retry.
+- The APK is version 0.3.2 (302), making the corrected build distinguishable from the previously installed 0.3.1 build.
+- 39 JVM unit tests passed with zero failures, including HTTP 408 paid fallback, bracketed-caption preservation, retry state preservation, and legacy status cleanup regressions. Android instrumentation sources compiled.
+- Lint passed with zero errors, the 0.3.2 debug APK assembled successfully, and `git diff --check` passed with only the repository's existing line-ending notices.
+- Independent review found one blocking caption-truncation edge case and two non-blocking retry-state risks. All three were repaired and re-reviewed with no remaining blockers. This follow-up is **Reviewed**, **Verified**, and **Accepted**.
+- No device or emulator was connected, so installing over the user's current app and live-key verification remain pending.
+
+## Follow-up verification: Cookbook Club consumer redesign
+
+Executed locally on 2026-09-15:
+
+```powershell
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug
+.\gradlew.bat compileDebugAndroidTestKotlin
+git diff --check
+```
+
+Results:
+
+- The v0.4.0 (303) **Cookbook Club** direction replaces the generic AI/wellness styling with a saved-Reel mark, editorial recipe hierarchy, tomato/aubergine/lime palette, paper surfaces, asymmetric cards, and Recipes/Imports/You navigation.
+- The first-use recipe screen, add sheet, import queue, failed-card retry, editor, and detail copy prioritize user outcomes; provider terminology remains visible only where it is necessary to configure or diagnose the connection.
+- Core light-theme pairs measured from 5.74:1 to 16.72:1. A reviewer-found navigation contrast regression was repaired by using semantic on-colors; a two-line app-bar treatment was also reduced to one line for large-font resilience.
+- 39 JVM unit tests passed with zero failures. Android instrumentation sources compiled. Lint passed with zero errors and 30 warnings. The debug APK assembled successfully and `git diff --check` passed with only line-ending notices.
+- Independent review confirmed the free-primary/paid-fallback and direct card retry behavior remained correct. After the accessibility repair, the reviewer recorded no blocking findings. This bounded follow-up is **Reviewed**, **Verified**, and **Accepted**.
+- Remaining non-blocking debt: newly added strings follow the existing codebase's inline-string convention and should move to resources before localization/pseudolocale work.
+- Device screenshots, TalkBack, rendered 200% font, live Instagram, and live Gemini verification remain pending because no emulator, device, or production credentials were available.
+
+## Follow-up verification: supplied bowl-and-heart logo
+
+Executed locally on 2026-09-15:
+
+```powershell
+.\gradlew.bat :app:assembleDebug :app:lintDebug
+git diff --check
+```
+
+Results:
+
+- Version 0.4.1 (304) uses a native orange-to-red bowl-and-heart mark in legacy, adaptive, monochrome themed-icon, and in-app app-bar variants.
+- The source image was treated as visual reference and redrawn as scalable Android vectors; no screenshot background or wordmark bitmap was embedded.
+- Lint passed with zero errors and the debug APK assembled successfully.
+- Independent review found no blocking issues. Its one non-blocking adaptive-mask observation was repaired by moving the outer accent into the safe zone. This bounded follow-up is **Reviewed**, **Verified**, and **Accepted**.

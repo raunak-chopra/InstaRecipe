@@ -24,4 +24,37 @@ class ServingScalerTest {
     fun leavesTextWithoutQuantityUnchanged() {
         assertEquals("salt to taste", ServingScaler.scaleIngredient("salt to taste", 4f))
     }
+
+    @Test
+    fun splitsIngredientIntoQuantityUnitAndDescription() {
+        val (qty, desc) = ServingScaler.splitIngredientParts("2 tbsp extra-virgin olive oil")
+        assertEquals("2 tbsp", qty)
+        assertEquals("extra-virgin olive oil", desc)
+    }
+
+    @Test
+    fun extractsDurationsFromCookingSteps() {
+        val mentions = com.instarecipe.app.ui.components.extractStepDurations(
+            "Simmer gently for 12 to 15 minutes, then rest for 5 mins before serving."
+        )
+        assertEquals(2, mentions.size)
+        assertEquals("15 min", mentions[0].label)
+        assertEquals(900, mentions[0].totalSeconds)
+        assertEquals("5 min", mentions[1].label)
+        assertEquals(300, mentions[1].totalSeconds)
+    }
+
+    @Test
+    fun matchesStepIngredientsContextually() {
+        val ingredients = listOf(
+            "2 tbsp olive oil",
+            "4 cloves garlic, minced",
+            "400g canned cherry tomatoes"
+        )
+        val matched = com.instarecipe.app.ui.components.matchIngredientsForStep(
+            "Heat the olive oil in a skillet and sauté the garlic until fragrant.",
+            ingredients
+        )
+        assertEquals(listOf("2 tbsp olive oil", "4 cloves garlic, minced"), matched)
+    }
 }

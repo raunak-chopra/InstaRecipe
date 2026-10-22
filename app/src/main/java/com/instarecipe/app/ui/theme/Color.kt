@@ -2,52 +2,55 @@ package com.instarecipe.app.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Brand palette: food supplies the colour; the interface supplies a warm, quiet canvas.
-val EspressoBlack = Color(0xFF101311)
-val WarmCharcoal = Color(0xFF191D1A)
-val SoftCharcoal = Color(0xFF303631)
-val TomatoCoral = Color(0xFFFF806F)
-val DeepCoral = Color(0xFFE96D5E)
-val Apricot = Color(0xFFFFB38A)
-val WarmWhite = Color(0xFFF7F4EF)
-val MushroomGrey = Color(0xFFB8B7B1)
-val Stone = Color(0xFF8D928D)
-val SuccessSage = Color(0xFF82A98B)
+/**
+ * Kitchen Journal palette.
+ *
+ * Keep feature code on semantic roles rather than scattering raw hex values. The bright
+ * tomato and butter tones are intentionally graphic accents; readable UI text uses the
+ * deeper roles below.
+ */
+val SurfaceCanvas = Color(0xFFF5E9D7)
+val SurfaceRaised = Color(0xFFFFF8EF)
+val SurfaceInk = Color(0xFF241D17)
 
-val CoralTintedSurface = Color(0xFF3A2420)
-val ApricotTintedSurface = Color(0xFF3A2A21)
-val NeutralChipSurface = Color(0xFF232824)
-val SageTintedSurface = Color(0xFF213329)
+val TextPrimary = Color(0xFF241D17)
+val TextSecondary = Color(0xFF62584D)
+val TextOnInk = Color(0xFFFFF8EF)
 
-// Warm light-mode counterparts. Coral remains the brand action colour in both modes.
-val WarmCanvas = Color(0xFFFFFAF6)
-val WarmSurface = Color(0xFFFFFFFF)
-val WarmSurfaceVariant = Color(0xFFF4ECE6)
-val WarmBorder = Color(0xFFDDD3CC)
-val WarmInk = Color(0xFF211A18)
-val WarmMuted = Color(0xFF6F6661)
-val PaleCoral = Color(0xFFFFE1DB)
-val PaleApricot = Color(0xFFFFE8D8)
-val PaleSage = Color(0xFFD9E8DC)
+val AccentTomatoDeep = Color(0xFFB53C24)
+val AccentTomatoBright = Color(0xFFE65A32)
+val AccentLeaf = Color(0xFF31583C)
+val AccentButter = Color(0xFFF2BD45)
+val AccentBerry = Color(0xFF9F3151)
 
-// Compatibility aliases retained while feature code migrates to Material semantic roles.
-val DeepBasil = TomatoCoral
-val DeepBasilLight = TomatoCoral
-val DeepBasilDark = DeepCoral
-val DeepBasilContainer = PaleCoral
-val OnDeepBasilContainer = WarmInk
-val WarmSaffron = Apricot
-val WarmSaffronContainer = PaleApricot
-val OnWarmSaffronContainer = WarmInk
-val GoldenHoney = Apricot
-val GoldenHoneyContainer = PaleApricot
-val ToastedSesame = WarmCanvas
-val CardSurface = WarmSurface
-val SurfaceVariant = WarmSurfaceVariant
-val BorderSubtle = WarmBorder
-val CharcoalSlate = WarmInk
-val HerbMuted = WarmMuted
-val HerbSubtle = Stone
-val SuccessSageContainer = PaleSage
-val AlertPaprika = Color(0xFFBA1A1A)
-val AlertPaprikaContainer = Color(0xFFFFDAD6)
+val BorderSoft = Color(0xFFD8C8B3)
+val FeedbackError = Color(0xFFA52E2A)
+val FeedbackSuccess = Color(0xFF2F6A48)
+
+// Accessible, low-chroma containers derived from the semantic roles above.
+val TomatoContainer = Color(0xFFF3D2C8)
+val LeafContainer = Color(0xFFDCE8DC)
+val ButterContainer = Color(0xFFFBEAC0)
+val BerryContainer = Color(0xFFF0D6DE)
+val ErrorContainer = Color(0xFFF5D5D0)
+val SuccessContainer = Color(0xFFDCE9DF)
+val SurfaceVariantWarm = Color(0xFFEADCC9)
+
+// Dark-theme surfaces keep the same material contrast without turning the product into a
+// permanently dark restaurant UI.
+val TomatoTintedSurface = Color(0xFF54291E)
+val LeafTintedSurface = Color(0xFF253B2B)
+val ButterTintedSurface = Color(0xFF4B3A1D)
+val SurfaceVariantInk = Color(0xFF40352B)
+val TextSecondaryOnInk = Color(0xFFE1D1BE)
+val SurfaceInkRaised = Color(0xFF30271F)
+val DarkTomatoPrimary = Color(0xFFE98468)
+val DarkTomatoOnContainer = Color(0xFFFFD8CC)
+val DarkLeafPrimary = Color(0xFFA7C9AD)
+val DarkLeafOnContainer = Color(0xFFD5EBD8)
+val DarkButterOnContainer = Color(0xFFFFE5A6)
+val DarkOutline = Color(0xFF6F5D4C)
+val DarkError = Color(0xFFFFB4AB)
+val DarkErrorOn = Color(0xFF5C0B0B)
+val DarkErrorContainer = Color(0xFF6E201C)
+val DarkErrorOnContainer = Color(0xFFFFDAD5)

@@ -2,18 +2,27 @@
 
 InstaRecipe is a native Android cookbook for saving recipes discovered on Instagram. Share a Reel URL or a video with the app, use your own Google Gemini API keys to turn it into a structured recipe, and keep it in a local cookbook.
 
+The brand direction is **Kitchen Journal + Save-to-Stove + Practical Index**: **Saved. Sorted.
+Cooked.**
+
 > Recipe extraction is assistive. Always review ingredient quantities, timings, allergens, and food-safety instructions before cooking.
+
+## Development status — 22 October 2026
+
+The approved UI/UX revision builds with the existing app colours. The owner approved verified checksum repairs; strict dependency verification remains enabled. The debug APK's signature verified, all 94 Gradle unit tests passed, and instrumentation tests compiled and packaged. See [APK/build evidence](docs/build-apk-2026-10-22.md) for the artifact, hash and device-test status, and [work status](docs/work-status.md) for remaining UX acceptance work.
 
 ## What it does
 
 - Accepts shared Instagram Reel links and local video files.
 - Resolves public Reel media when available, with a caption/manual-video fallback when it is not.
 - Uses Gemini multimodal analysis to extract recipe metadata, ingredients, directions, timings, and notes.
-- Keeps unfinished or failed imports under Imports for review while completed recipes enter the cookbook.
+- Keeps Instagram sources and unfinished recipes in Imports, distinguishing reading, missing connection, missing source details, partial content and ready-to-review states. Explicit Save to recipes requires a title, real ingredients and steps; Save draft and guarded exit keep unfinished work.
 - Provides search, working tag/category filters, favorite/cooked markers, serving scaling, prep checklists, and a distraction-reduced cooking mode with a timer.
-- Uses flip cards: tap a card for its main ingredients, or use its dedicated View action to open the full recipe.
-- Resolves only public Instagram content or content returned by an explicitly configured HTTPS resolver; the app never reads Instagram session cookies.
-- Supports system, light, and dark themes.
+- Uses one Recipes library with visible search, compact rows, Favorites / To cook / Cooked views and a filters/sort sheet. Tap a recipe to open it; its menu retains cooking and cooked-state actions.
+- Offers link, recipe-text, video and manual entry through Add recipe. Instagram access may use an explicitly connected app-private session or a configured HTTPS resolver; video/text fallback remains available.
+- Supports system, light, and dark themes, plus a persistent Standard / Reduced / Off Motion preference.
+- Restores one active cooking session (step, scale, checklist and timer). The timer uses elapsed-time deadlines; alerts sound while cooking mode is open. A reboot clears a running timer; no background alarm service is promised.
+- Keeps cook photos optional through the recipe’s Add photo action; completion does not force a camera prompt.
 
 ## How it works
 
@@ -27,7 +36,7 @@ Video resolver / selected local video
 Gemini multimodal extraction (optional)
             |
             v
-Inbox review and editing
+Imports review and editing
             |
             v
 Local cookbook (Room database)
@@ -51,7 +60,7 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 Alternatively, open the folder in Android Studio and run the `app` configuration.
 
-To enable recipe creation, open **Settings**, enter the free key as the primary key and optionally enter a paid-project key as fallback, then use **Check connection**. Checks run concurrently with a short deadline. The paid key is tried after a free-key timeout, authentication/permission rejection, quota response, model-availability failure, or temporary Gemini outage. Both keys remain encrypted on the device.
+To enable recipe creation, open **Settings**, enter a current Gemini Auth key as the primary key and optionally enter a second Auth key as backup, then use **Check connection**. Connection checks use the model-capability endpoint and do not spend generation tokens. The backup key is tried after a primary-key timeout, authentication/permission rejection, quota response, model-availability failure, or temporary Gemini outage. Both keys remain encrypted on the device.
 
 ## Project structure
 
@@ -65,7 +74,7 @@ app/src/main/java/com/instarecipe/app/
   TagNormalizer.kt             Tag aliases, validation, matching, and deduplication
   GeminiRecipeExtractor.kt     Gemini prompt and recipe-domain mapping
   GeminiApiClient.kt           Typed Gemini HTTP, retry, Files API, and cleanup transport
-  InstagramExtractionWorker.kt Background Reel resolution, extraction, retry, and auto-save
+  InstagramExtractionWorker.kt Background Reel resolution, extraction, retry, and reviewable-draft persistence
   InstagramResolver.kt         Public/custom HTTPS resolution and bounded downloads
   OkHttpAwait.kt               Coroutine-cancellable OkHttp bridge
   VideoFileStore.kt            Validated, size-limited local video copying
@@ -80,7 +89,7 @@ app/src/main/res/              App icons, colors, styles, and bundled typography
 - Sharing a Reel URL may send that URL to a configured resolver and, when extraction is used, sends the selected video/caption to Google Gemini under your API account.
 - Instagram may prevent automated media resolution. Use the app's manual video/caption paths when that happens.
 - This is a local-first private app. Recipes use Room, cloud/device-transfer backup is disabled, and clearing app data or uninstalling removes the cookbook.
-- The app does not collect or reuse Instagram cookies. Private/session-only posts must be supplied as a local video or caption by the user.
+- Instagram access is opt-in for personal use: an app-private WebView session may be used for Reel imports and can be disconnected/cleared from Settings. The app does not export or log cookies.
 - Resolver redirects are checked hop-by-hop, local/private network destinations are rejected, and downloads are MIME-, storage-, and size-limited.
 - The bundled Elvara Sans font files remain subject to their original license. Confirm that your license permits redistribution before making the repository public.
 
@@ -88,17 +97,19 @@ app/src/main/res/              App icons, colors, styles, and bundled typography
 
 ### Current development
 
+- Implemented the approved 22 October recipe-first UX revision using the existing palette; see [version history](docs/version-history.md) for scope, files, rollback and verification limits.
+
 - Added Room persistence with safe one-time migration from the previous local recipe store.
 - Added Keystore-backed Gemini-key storage and header-based API authentication.
 - Added tag editing, normalization, search/filter navigation, and dynamic cookbook tag filters.
-- Added true flip cards with ingredient backs and separate View/Cook actions.
+- Earlier flip-card UI is superseded by directly opening compact recipe rows in the October UX revision.
 - Fixed extraction to Gemini 3.8 Flash and removed obsolete model selection and model fallback behavior.
 - Added encrypted primary/backup API keys with selective failover for rejected, rate-limited, or unavailable keys.
-- Clarified the key order as free primary and paid fallback, added short concurrent connection checks, and prevented Gemini retries from being multiplied by WorkManager.
+- Clarified the key order as primary and backup Auth keys, added short concurrent connection checks, and prevented Gemini retries from being multiplied by WorkManager.
 - Simplified navigation to Cookbook, Imports, and Settings; integrated search into Cookbook, added a single Add recipe sheet, made recipe cards open directly, and moved technical controls under Advanced settings.
-- Shared Reel links now resolve and extract through WorkManager; successful results move into the Saved cookbook, while failed drafts can be re-shared to retry.
+- Shared Reel links now resolve and extract through WorkManager; successful results remain populated in Imports for review, while failed drafts can be re-shared to retry. Explicit link retries open the review editor after extraction.
 - Replaced manual Gemini JSON handling with typed serialization and added MockWebServer coverage for success, malformed/error responses, retries, cancellation, uploads, and cleanup.
-- Removed Instagram cookie/session handling and hardened resolver/download boundaries.
+- Hardened resolver/download boundaries; current opt-in Instagram session behavior is described in the privacy section above.
 - Added Room schema migration, generated IDs, source-link uniqueness, and migration coverage.
 - Upgraded to Gradle 9.7.1, AGP 9.4, Kotlin 2.4.20, API 37, Compose BOM 2026.09, OkHttp 5.5, and coroutines 1.11.
 
