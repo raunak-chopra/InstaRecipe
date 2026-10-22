@@ -39,3 +39,11 @@ See [the verification record](ux-implementation-verification-2026-10-22.md). Sup
 Initial owner-modified sources are preserved locally in ignored `scratch/ux-before-2026-10-22/src`; base HEAD was `12edc97`, with eight pre-existing modified source/test files. Roll back only this revision's reviewed hunks using that snapshot as context. **Do not reset the repository or copy the entire snapshot over later owner work.** New files may be removed individually only after verifying references. No automated rollback or deletion was performed.
 
 Existing Room recipe rows, IDs, source links, favorite/cooked fields, tags, notes and photo paths remain compatible; no database migration or app-data clearing is required. New cooking-session preferences can remain inert under an older build. Draft saves intentionally preserve unfinished work in Imports; promoting a reviewed recipe removes workflow tags while retaining other tags. Existing encrypted key and Instagram-session storage are unchanged.
+
+## 2026-10-22 — Restore Linux CI artifact verification
+
+- Behavior: trust the exact Linux AAPT2 9.4.0-15978811 artifact used by existing Ubuntu CI alongside its already-pinned Windows artifact.
+- Files: gradle/verification-metadata.xml and this history entry.
+- Reason: confirmed CI failed on missing platform-specific verification metadata. Google Maven's published SHA-1 matched the downloaded artifact before SHA-256 f5bebd466ecf14d341fd465f2756a16d86052f29eb4532003d5ff7bcffd08de5 was recorded.
+- Verification: XML parses; strict verification and dependency versions remain unchanged. The Linux CI rerun is the acceptance check.
+- Rollback: revert this checksum/history commit; do not disable dependency verification.
