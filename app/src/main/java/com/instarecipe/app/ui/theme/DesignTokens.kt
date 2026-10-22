@@ -25,6 +25,7 @@ object AppRadii {
     val hairline = 2.dp
     val surface = 4.dp
     val control = 12.dp
+    val card = 12.dp
 }
 
 @Immutable

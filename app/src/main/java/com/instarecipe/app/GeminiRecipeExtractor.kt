@@ -273,7 +273,7 @@ object GeminiRecipeExtractor {
         }
     }
 
-    private fun parseRecipePayload(
+    internal fun parseRecipePayload(
         rawRecipe: String,
         sourceUrl: String,
         fallbackCreator: String?
@@ -304,7 +304,7 @@ object GeminiRecipeExtractor {
         if (extractionStatus.isNotBlank() && extractionStatus !in setOf("complete", "partial", "no_recipe")) {
             throw IllegalStateException("Gemini returned an unknown extraction status.")
         }
-        if (extractionStatus == "partial" || extractionStatus == "no_recipe") {
+        if (extractionStatus == "no_recipe") {
             val missing = recipe.missingDetails.orEmpty().filter(String::isNotBlank).take(2)
             val detail = missing.joinToString(", ").takeIf(String::isNotBlank)
             throw IllegalStateException(
@@ -315,13 +315,17 @@ object GeminiRecipeExtractor {
             recipe.prepTime?.takeIf { it.isNotBlank() }?.let { append("Prep Time: $it\n") }
             recipe.cookTime?.takeIf { it.isNotBlank() }?.let { append("Cook Time: $it\n") }
             recipe.notes?.takeIf { it.isNotBlank() }?.let(::append)
+            if (extractionStatus == "partial") {
+                append("\n\nReview needed: ")
+                append(recipe.missingDetails.orEmpty().filter(String::isNotBlank).joinToString("; ").ifBlank { "Some details were missing from the source." })
+            }
         }.trim()
 
         val extracted = ExtractedRecipeData(
             title = title,
             creator = creator,
             category = category,
-            tags = TagNormalizer.normalizeAll(tags),
+            tags = TagNormalizer.normalizeAll((if (extractionStatus == "partial") listOf(PARTIAL_RECIPE_TAG) else emptyList()) + tags),
             ingredients = ingredients,
             steps = steps,
             notes = combinedNotes,
@@ -331,7 +335,9 @@ object GeminiRecipeExtractor {
             dietType = parseDietType(recipe.dietType)
         )
         val qualityFailure = assessRecipeQuality(extracted.title, extracted.ingredients, extracted.steps).failure
-        check(qualityFailure == null) {
+        val hasPartialContent = extractionStatus == "partial" &&
+            (meaningfulRecipeItems(ingredients).isNotEmpty() || meaningfulRecipeItems(steps).isNotEmpty())
+        check(qualityFailure == null || hasPartialContent) {
             "${qualityFailure?.userMessage() ?: "The recipe details were incomplete."} Add the Reel video or paste its caption, then try again."
         }
         return extracted

@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import com.instarecipe.app.ui.components.ModernRecipeCard
+import com.instarecipe.app.ui.components.ImportCard
 import com.instarecipe.app.ui.theme.InstaRecipeTheme
 import com.instarecipe.app.ui.theme.LocalReducedMotion
 import com.instarecipe.app.ui.theme.ThemeMode
@@ -69,7 +70,7 @@ class RecipeCardAccessibilityTest {
     }
 
     @Test
-    fun retryAction_isVisibleAndInvokableOnImportCard() {
+    fun emptyImport_hasAnAccessibleRecoveryActionInsteadOfAReadyLabel() {
         val retryClicked = AtomicBoolean(false)
         val recipe = Recipe(
             id = 43,
@@ -91,27 +92,21 @@ class RecipeCardAccessibilityTest {
             InstaRecipeTheme(ThemeMode.Light) {
                 val density = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale = 2f)) {
-                    ModernRecipeCard(
+                    ImportCard(
                         recipe = recipe,
-                        onOpen = {},
-                        onToggleFavorite = {},
-                        onToggleCooked = {},
-                        onStartCooking = {},
-                        footerActionLabel = "Extract from link again",
-                        onFooterAction = { retryClicked.set(true) }
+                        hasConnection = true,
+                        isRetrying = false,
+                        onReview = { retryClicked.set(true) },
+                        onSettings = {},
+                        onRetry = {}
                     )
                 }
             }
         }
 
-        composeRule.onNodeWithContentDescription("${recipe.title}. Open recipe").assertExists()
-        composeRule.onNode(
-            SemanticsMatcher.expectValue(
-                SemanticsProperties.StateDescription,
-                "Extract from link again"
-            ),
-            useUnmergedTree = true
-        )
+        composeRule.onNodeWithText("Ready to review").assertDoesNotExist()
+        composeRule.onNodeWithText("0 ingredients").assertDoesNotExist()
+        composeRule.onNodeWithText("Add video or text")
             .assertHasClickAction()
             .assertHeightIsAtLeast(48.dp)
             .performClick()
@@ -138,15 +133,13 @@ class RecipeCardAccessibilityTest {
 
         composeRule.setContent {
             InstaRecipeTheme(ThemeMode.Light) {
-                ModernRecipeCard(
+                ImportCard(
                     recipe = recipe,
-                    onOpen = {},
-                    onToggleFavorite = {},
-                    onToggleCooked = {},
-                    onStartCooking = {},
-                    footerActionLabel = "Extracting from link…",
-                    onFooterAction = {},
-                    footerActionEnabled = false
+                    hasConnection = true,
+                    isRetrying = true,
+                    onReview = {},
+                    onSettings = {},
+                    onRetry = {}
                 )
             }
         }
@@ -154,11 +147,11 @@ class RecipeCardAccessibilityTest {
         composeRule.onNode(
             SemanticsMatcher.expectValue(
                 SemanticsProperties.StateDescription,
-                "Extracting from link…"
+                "Reading recipe…"
             ),
             useUnmergedTree = true
         )
             .assertExists()
-            .assertIsNotEnabled()
+        composeRule.onNodeWithText("Import in progress").assertIsNotEnabled()
     }
 }

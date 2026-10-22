@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
@@ -189,14 +190,14 @@ private fun Intent.extractSharePayload(): SharePayload? {
 }
 
 internal enum class Tab(val label: String, val icon: ImageVector) {
-    Home("Shelf", Icons.Default.Home),
+    Home("Recipes", Icons.AutoMirrored.Filled.MenuBook),
     /** Kept only so previously saved activity state can be restored after upgrading. */
     Explore("Explore", Icons.Default.Search),
     Collections("Collections", Icons.AutoMirrored.Filled.MenuBook),
     Saved("Saved", Icons.Default.Bookmark),
-    /** A focused sub-route: imports remain reachable but are not a sixth primary destination. */
+    /** Imports own unfinished work, separately from reviewed recipes. */
     Inbox("Imports", Icons.Default.Inbox),
-    Settings("You", Icons.Default.Person)
+    Settings("Settings", Icons.Default.Settings)
 }
 
 @Composable
@@ -210,6 +211,7 @@ private fun InstaRecipeApp(
     var themeMode by remember { mutableStateOf(ThemePreferences.load(context)) }
     var motionMode by remember { mutableStateOf(MotionPreferences.load(context)) }
     val recipes by viewModel.recipes.collectAsStateWithLifecycle()
+    val isLibraryLoading by viewModel.libraryLoading.collectAsStateWithLifecycle()
     val videoExtractionState by viewModel.videoExtractionState.collectAsStateWithLifecycle()
     val instagramRetryPhases by viewModel.instagramRetryPhases.collectAsStateWithLifecycle()
     val instagramRetryError by viewModel.instagramRetryError.collectAsStateWithLifecycle()
@@ -220,8 +222,12 @@ private fun InstaRecipeApp(
     var editingRecipeId by rememberSaveable { mutableStateOf<Long?>(null) }
     var viewingRecipeId by rememberSaveable { mutableStateOf<Long?>(null) }
     var cookingRecipeId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var cookingServingScale by rememberSaveable { mutableStateOf(1.0f) }
+    var cookingCheckedIngredientsCsv by rememberSaveable { mutableStateOf("") }
+    var resumableCooking by remember { mutableStateOf(CookingSessions.load(context)) }
     val mainStateHolder = rememberSaveableStateHolder()
     var captureRecipe by remember { mutableStateOf<Recipe?>(null) }
+    var showCookPhotoOptions by remember { mutableStateOf(false) }
     var pendingCookPhotoFile by remember { mutableStateOf<File?>(null) }
     var cookPhotoError by remember { mutableStateOf<String?>(null) }
     val retryingInstagramImportIds = instagramRetryPhases.keys
@@ -248,7 +254,8 @@ private fun InstaRecipeApp(
     val currentViewingRecipe = viewingRecipeId?.let { id -> recipes.firstOrNull { it.id == id } }
     val currentCookingRecipe = cookingRecipeId?.let { id -> recipes.firstOrNull { it.id == id } }
 
-    LaunchedEffect(editingRecipeId, viewingRecipeId, cookingRecipeId, recipes) {
+    LaunchedEffect(recipes, isLibraryLoading) {
+        if (isLibraryLoading) return@LaunchedEffect
         if (editingRecipeId != null && editingRecipeId != 0L && currentEditingRecipe == null) {
             editingRecipeId = null
         }
@@ -261,12 +268,19 @@ private fun InstaRecipeApp(
     }
 
     var extractionProgress by remember { mutableStateOf(ExtractionProgress()) }
-    var pendingSharePayload by remember { mutableStateOf<SharePayload?>(null) }
     var acceptedSharedText by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingReviewRecipeId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(initialSharePayload) {
-        if (initialSharePayload != null) pendingSharePayload = initialSharePayload
+        when (val incoming = initialSharePayload) {
+            is SharePayload.Text -> acceptedSharedText = incoming.content
+            is SharePayload.Video -> {
+                selectedTab = Tab.Inbox
+                viewModel.importSharedVideo(incoming.uri)
+                onShareHandled()
+            }
+            null -> Unit
+        }
     }
 
     LaunchedEffect(viewModel) {
@@ -298,55 +312,12 @@ private fun InstaRecipeApp(
 
     LaunchedEffect(videoExtractionState.completedRecipe?.id) {
         videoExtractionState.completedRecipe?.let { persisted ->
-            editingRecipeId = persisted.id
+            pendingReviewRecipeId = persisted.id
             viewModel.acknowledgeCompletedVideoRecipe(persisted.id)
         }
     }
 
-    pendingSharePayload?.let { pending ->
-        AlertDialog(
-            onDismissRequest = {
-                pendingSharePayload = null
-                onShareHandled()
-            },
-            title = { Text("Import shared recipe?") },
-            text = {
-                Text(
-                    when (pending) {
-                        is SharePayload.Text ->
-                            "InstaRecipe will read the shared link and create an editable recipe from its caption or video."
-                        is SharePayload.Video ->
-                            "InstaRecipe will temporarily upload this video to create an editable recipe."
-                    }
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        when (pending) {
-                            is SharePayload.Text -> acceptedSharedText = pending.content
-                            is SharePayload.Video -> {
-                                selectedTab = Tab.Inbox
-                                viewModel.importSharedVideo(pending.uri)
-                                onShareHandled()
-                            }
-                        }
-                        pendingSharePayload = null
-                    }
-                ) { Text("Import") }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        pendingSharePayload = null
-                        onShareHandled()
-                    }
-                ) { Text("Cancel") }
-            }
-        )
-    }
-
-    BackHandler(enabled = cookingRecipeId != null || editingRecipeId != null || viewingRecipeId != null || selectedTab != Tab.Home) {
+    BackHandler(enabled = editingRecipeId == null && (cookingRecipeId != null || viewingRecipeId != null || selectedTab != Tab.Home)) {
         when {
             cookingRecipeId != null -> cookingRecipeId = null
             editingRecipeId != null -> editingRecipeId = null
@@ -420,10 +391,12 @@ private fun InstaRecipeApp(
     }
 
     // Process accepted text shares; video shares transfer to the ViewModel synchronously on acceptance.
-    LaunchedEffect(acceptedSharedText) {
+    LaunchedEffect(acceptedSharedText, editingRecipeId) {
         val sharedText = acceptedSharedText ?: return@LaunchedEffect
+        // Queue an incoming share while the editor owns an unsaved draft.
+        if (editingRecipeId != null) return@LaunchedEffect
 
-        val targetUrl = InstagramResolver.extractInstagramUrl(sharedText)
+        val targetUrl = recipeImportUrl(sharedText)
         if (targetUrl == null) {
             extractionProgress = ExtractionProgress(
                 error = "The shared text does not contain a valid HTTPS Instagram post or reel link."
@@ -434,8 +407,24 @@ private fun InstaRecipeApp(
         }
 
         // Saved recipes are deduplicated; failed/pending drafts may be reclaimed by WorkManager.
-        if (!shouldQueueInstagramExtraction(recipes, targetUrl)) {
-            selectedTab = Tab.Home
+        val existingRecipe = try {
+            viewModel.findBySourceUrl(targetUrl)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            extractionProgress = ExtractionProgress(error = "Couldn't check your saved links. Try the import again.")
+            onShareHandled()
+            acceptedSharedText = null
+            return@LaunchedEffect
+        }
+        if (existingRecipe != null) {
+            if (existingRecipe.isCookbookReady()) {
+                selectedTab = Tab.Home
+                viewingRecipeId = existingRecipe.id
+            } else {
+                selectedTab = Tab.Inbox
+                if (!TagNormalizer.matches(existingRecipe.tags, INSTAGRAM_PROCESSING_TAG)) editingRecipeId = existingRecipe.id
+            }
             onShareHandled()
             acceptedSharedText = null
             return@LaunchedEffect
@@ -460,11 +449,11 @@ private fun InstaRecipeApp(
                 savedDate = LocalDate.now().toString()
             )
             try {
-                viewModel.upsertAndAwait(draft)
+                viewModel.keepLinkDraft(draft)
                 onShareHandled()
                 extractionProgress = ExtractionProgress(
                     isExtracting = false,
-                    error = "A Gemini API key is required for AI extraction. Add a primary or backup key in Settings."
+                    error = "Your link is kept in Imports. Connect your Gemini key in Settings, then try the link again."
                 )
                 acceptedSharedText = null
             } catch (cancelled: CancellationException) {
@@ -473,7 +462,7 @@ private fun InstaRecipeApp(
                 extractionProgress = ExtractionProgress(
                     error = "The shared recipe could not be saved. Try the import again."
                 )
-                pendingSharePayload = SharePayload.Text(sharedText)
+                onShareHandled()
                 acceptedSharedText = null
             }
             return@LaunchedEffect
@@ -494,7 +483,7 @@ private fun InstaRecipeApp(
             extractionProgress = ExtractionProgress(
                 error = "Background extraction could not be scheduled. Try the import again."
             )
-            pendingSharePayload = SharePayload.Text(sharedText)
+            onShareHandled()
             acceptedSharedText = null
         }
     }
@@ -513,20 +502,23 @@ private fun InstaRecipeApp(
                     recipe = currentEditingRecipe,
                     onCancel = { editingRecipeId = null },
                     onSave = { saved ->
-                        viewModel.upsert(saved) { persisted ->
-                            editingRecipeId = null
+                        val persisted = viewModel.upsertAndAwait(saved)
+                        editingRecipeId = null
+                        if (persisted.status == RecipeStatus.Draft) {
+                            viewingRecipeId = null
+                            selectedTab = Tab.Inbox
+                        } else {
                             viewingRecipeId = persisted.id
                         }
                     },
-                    onTriggerAiExtraction = { url, notes, onResult ->
-                        coroutineScope.launch {
+                    onTriggerAiExtraction = { url, notes ->
                             extractionProgress = ExtractionProgress(
                                 isExtracting = true,
                                 stage = "Extracting recipe details..."
                             )
                             var resolutionFile: File? = null
                             try {
-                                val cleanUrl = InstagramResolver.extractInstagramUrl(url)
+                                val cleanUrl = recipeImportUrl(url)
                                     ?: throw IllegalArgumentException("Enter a valid HTTPS Instagram post or reel link.")
                                 val customResolver = GeminiRecipeExtractor.getCustomResolver(context).ifBlank { null }
                                 val instagramProfile = GeminiRecipeExtractor.getInstagramProfileUrl(context).ifBlank { null }
@@ -548,26 +540,19 @@ private fun InstaRecipeApp(
                                     sourceUrl = cleanUrl,
                                     creatorName = resolution.creator
                                 )
-                                onResult(Result.success(extracted))
                                 extractionProgress = ExtractionProgress(isExtracting = false)
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (e: Exception) {
-                                onResult(Result.failure(e))
-                                extractionProgress = ExtractionProgress(
-                                    isExtracting = false,
-                                    error = "Couldn't create recipe: ${e.message}"
-                                )
+                                extracted
                             } finally {
+                                extractionProgress = ExtractionProgress(isExtracting = false)
                                 resolutionFile?.delete()
                                 InstagramResolver.cleanCachedReelVideos(context)
                             }
-                        }
                     }
                 )
 
                 currentViewingRecipe != null -> RecipeDetail(
                     recipe = currentViewingRecipe,
+                    hasCookingSession = resumableCooking?.recipeId == currentViewingRecipe.id,
                     onBack = { viewingRecipeId = null },
                     onEdit = { editingRecipeId = currentViewingRecipe.id },
                     onDelete = {
@@ -581,8 +566,12 @@ private fun InstaRecipeApp(
                     onToggleCooked = {
                         markCooked(currentViewingRecipe)
                     },
-                    onStartCooking = { cookingRecipeId = currentViewingRecipe.id },
-                    onRequestCookPhoto = { captureRecipe = currentViewingRecipe },
+                    onStartCooking = { scale, checkedCsv ->
+                        cookingServingScale = scale
+                        cookingCheckedIngredientsCsv = checkedCsv
+                        cookingRecipeId = currentViewingRecipe.id
+                    },
+                    onRequestCookPhoto = { captureRecipe = currentViewingRecipe; showCookPhotoOptions = true },
                     onRemoveCookPhoto = {
                         val oldPath = currentViewingRecipe.cookPhotoPath
                         viewModel.update(currentViewingRecipe.id) { copy(cookPhotoPath = "") }
@@ -624,18 +613,30 @@ private fun InstaRecipeApp(
                         libraryFilterId = "tag:${TagNormalizer.key(tag)}"
                         selectedTab = Tab.Home
                     },
-                    onOpen = { viewingRecipeId = it.id },
+                    onOpen = {
+                        if (it.belongsInImports()) editingRecipeId = it.id else viewingRecipeId = it.id
+                    },
                     onToggleFavorite = { recipe ->
                         viewModel.update(recipe.id) { copy(favorite = !favorite) }
                     },
                     onToggleCooked = { recipe ->
                         markCooked(recipe)
                     },
-                    onStartCooking = { recipe -> cookingRecipeId = recipe.id },
+                    onStartCooking = { recipe ->
+                        if (recipe.isCookbookReady()) {
+                            cookingServingScale = 1.0f
+                            cookingCheckedIngredientsCsv = ""
+                            cookingRecipeId = recipe.id
+                        }
+                    },
                     onAdd = {
                         editingRecipeId = 0L
                     },
                     onImportVideo = { importVideoLauncher.launch("video/*") },
+                    onImportLink = { acceptedSharedText = it },
+                    onImportText = viewModel::importRecipeText,
+                    resumeRecipe = recipes.firstOrNull { it.id == resumableCooking?.recipeId && it.isCookbookReady() },
+                    isLibraryLoading = isLibraryLoading,
                     onRetryInstagramImport = viewModel::retryInstagramImport,
                     retryingInstagramImportIds = retryingInstagramImportIds,
                     searchRecipeIds = viewModel::searchRecipeIds,
@@ -656,10 +657,13 @@ private fun InstaRecipeApp(
             // Interactive Cooking Mode Overlay
             currentCookingRecipe?.let { cookingRecipe ->
                 CookingModeDialog(
+                    recipeId = cookingRecipe.id,
                     recipeTitle = cookingRecipe.title,
                     steps = cookingRecipe.steps,
                     ingredients = cookingRecipe.ingredients,
-                    onClose = { cookingRecipeId = null },
+                    initialServingScale = cookingServingScale,
+                    initialCheckedIngredientsCsv = cookingCheckedIngredientsCsv,
+                    onClose = { cookingRecipeId = null; resumableCooking = CookingSessions.load(context) },
                     onFinishAndMarkCooked = {
                         val cookedDate = LocalDate.now().toString()
                         viewModel.update(cookingRecipe.id) { copy(cooked = true, cookedAt = cookedDate) }
@@ -668,9 +672,10 @@ private fun InstaRecipeApp(
                 )
             }
 
-            captureRecipe?.let { recipe ->
+            // Completion retains the optional capture context. Only an explicit photo action opens the chooser.
+            captureRecipe?.takeIf { showCookPhotoOptions }?.let { recipe ->
                 AlertDialog(
-                    onDismissRequest = { captureRecipe = null },
+                    onDismissRequest = { captureRecipe = null; showCookPhotoOptions = false },
                     title = { Text("You made it.") },
                     text = {
                         Text(
@@ -691,7 +696,7 @@ private fun InstaRecipeApp(
                             TextButton(onClick = { chooseCookPhotoLauncher.launch("image/*") }) {
                                 Text("Choose photo")
                             }
-                            TextButton(onClick = { captureRecipe = null }) { Text("Not now") }
+                            TextButton(onClick = { captureRecipe = null; showCookPhotoOptions = false }) { Text("Not now") }
                         }
                     }
                 )

@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformWhile
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -70,7 +71,9 @@ class InstaRecipeViewModel(
     internal val instagramRetryPhases: StateFlow<Map<Long, InstagramRetryPhase>> = mutableInstagramRetryPhases.asStateFlow()
     internal val instagramRetryError: StateFlow<InstagramRetryError?> = mutableInstagramRetryError.asStateFlow()
     internal val instagramRetryEffects = instagramRetryEffectChannel.receiveAsFlow()
-    val recipes: StateFlow<List<Recipe>> = repository.recipes.stateIn(
+    private val mutableLibraryLoading = MutableStateFlow(true)
+    val libraryLoading: StateFlow<Boolean> = mutableLibraryLoading.asStateFlow()
+    val recipes: StateFlow<List<Recipe>> = repository.recipes.onEach { mutableLibraryLoading.value = false }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList()
@@ -105,6 +108,33 @@ class InstaRecipeViewModel(
     fun searchRecipeIds(query: String): Flow<Set<Long>> = repository.searchIds(query)
 
     suspend fun upsertAndAwait(recipe: Recipe): Recipe = persistRecipe(repository, recipe)
+
+    suspend fun findBySourceUrl(sourceUrl: String): Recipe? = repository.findBySourceUrl(sourceUrl)
+
+    suspend fun keepLinkDraft(recipe: Recipe): Recipe = repository.createOrGetBySourceUrl(recipe)
+
+    fun importRecipeText(text: String) {
+        if (text.isBlank() || videoExtractionState.value.progress.isExtracting) return
+        val context = getApplication<Application>()
+        videoExtractionController.start("Keeping your recipe text…", "Text is kept in Imports. Extraction did not finish") { onStatus ->
+            val draft = persistRecipe(repository, Recipe(
+                id = 0, title = "", sourceUrl = "", creator = "", category = "Other",
+                tags = listOf("Needs review"), ingredients = emptyList(), steps = emptyList(), notes = text,
+                favorite = false, cooked = false, status = RecipeStatus.Draft, savedDate = LocalDate.now().toString()
+            ))
+            if (GeminiRecipeExtractor.getApiKeys(context).isEmpty()) {
+                draft
+            } else {
+                val extracted = GeminiRecipeExtractor.extractRecipe(context, null, text, "Pasted recipe text", null, onStatus)
+                persistRecipe(repository, draft.copy(
+                    title = extracted.title, creator = extracted.creator, category = extracted.category,
+                    tags = extracted.tags, ingredients = extracted.ingredients, steps = extracted.steps,
+                    notes = listOf(text, extracted.notes).filter(String::isNotBlank).distinct().joinToString("\n\n"),
+                    totalTimeMinutes = extracted.totalTimeMinutes, dietType = extracted.dietType
+                ))
+            }
+        }
+    }
 
     fun importGalleryVideo(uri: Uri) {
         importLocalVideo(uri, LocalVideoOrigin.Gallery)

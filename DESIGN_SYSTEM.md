@@ -1,7 +1,7 @@
 # InstaRecipe — Kitchen Journal design system
 
-**State:** Draft — implemented in the current UI, pending independent visual and device review
-**Updated:** 2026-09-16
+**State:** Approved layout revision built as a debug APK; unit tests passed; full device/accessibility inspection and independent review pending
+**Updated:** 2026-10-22
 
 ## Product idea
 
@@ -14,12 +14,12 @@ The product journey is expressed as **Saved → Sorted → Ready → Cooked → 
 emotional end state; “Sorted” is the practical promise that turns a saved post into usable cookbook
 content.
 
-The implementation uses four primary destinations—Shelf, Collections, Saved, and You—with Imports
-retained as a focused utility route during recipe creation. Shelf is a personal cookbook index:
-named food categories appear as chapters, while personal statuses such as `Saved to try`
-stay text-led rather than borrowing unrelated imagery. It remains local-first and supports
-Instagram/video import, recipe review, saving, search, source-backed recipe facts, serving scaling,
-checklists, cooking mode, timers, and private cook-photo capture after completion.
+The implementation has three primary destinations: **Recipes / Imports / Settings**. Recipes is
+the single searchable saved library; Imports owns sources and unfinished work. Legacy destination
+identities remain only to restore older activity state and redirect to Recipes. InstaRecipe remains
+a personal local-first app using the owner's Gemini key. No palette, font, dependency or Room
+schema change belongs to this revision. The selected design uses A's recipe-first hierarchy and
+C's compact row treatment from the [approved concepts](docs/ux-redesign-2026-10-22/CONCEPT-REVISION.md).
 
 ## Visual direction
 
@@ -29,8 +29,7 @@ checklists, cooking mode, timers, and private cook-photo capture after completio
 - **Practicality:** index-like labels, chapter tabs, source strips, clear metadata, numbered steps,
   and status cues that make the next cooking action obvious.
 - **Vibrancy:** one intentional tomato/leaf/butter move at a time. Standard recipe cards stay
-  paper-led; the Home feature and Collections covers use the reviewed food photographs recorded in
-  `ASSET_PROVENANCE.md`.
+  paper-led and title-led. The library has no decorative hero or collection-cover grid.
 - **Cooking:** plain sans, large type, screen-awake behavior, visible progress, timers, and no
   promotional or decorative modules in the active step flow.
 - **Personal evidence:** a finished cook can be photographed with the camera or chosen from the
@@ -74,14 +73,15 @@ primary, metadata, error, and success pairs on the light surfaces.
 - Display hierarchy uses the platform serif as the implemented editorial face; feature/collection
   typography remains selective rather than becoming a novelty UI font.
 - Elvara Sans is the licensed interface/body family.
-- Mobile display title is 40–48sp; body is 17sp with 28sp line height; cooking instructions are
-  21sp with 32sp line height.
-- Default surfaces use 0–4dp corners. Tactile controls use 12dp corners and at least 48dp height.
+- Use existing Material typography roles: headlineSmall for screen/detail headings, titleLarge
+  for recipe rows, and the existing recipe reading scale for ingredients and instructions.
+  Cooking instructions retain 21sp type with 32sp line height and follow user font scaling.
+- Recipe/import cards use `AppRadii.card` (12dp). Existing surface/control tokens remain 4dp/12dp. Controls use at least 48dp touch targets.
 - Elevation is zero by default; rules carry most of the hierarchy.
 
 ## Motion
 
-`MotionMode` is persistent in local preferences and appears under You → Appearance:
+`MotionMode` is persistent in local preferences and appears under Settings → Appearance:
 
 - **Standard** — gentle page and recipe transitions.
 - **Reduced** — less movement with essential feedback only.
@@ -98,9 +98,8 @@ card feedback, and tab changes honor the selected mode.
   controls so keyboard and screen-reader users can reach each action.
 - Checked ingredients use both a checkbox mark and text decoration/state.
 - Retry/loading/error messages use explicit copy and polite live-region semantics where state changes.
-- Text is allowed to reflow at 200% font scale; no essential recipe content is color-only.
-- Informative imagery must receive provenance and descriptive alt/content text before replacing the
-  current decorative placeholder.
+- Text should reflow at 200% font scale; native inspection of this revision is still pending. No essential recipe state is intentionally color-only.
+- Show a labelled private cook photo when available. Do not reserve a decorative image placeholder in recipe detail.
 
 ## Product and content guardrails
 
@@ -112,3 +111,32 @@ Editorial Home and Collection imagery is tracked in `ASSET_PROVENANCE.md`. Per-r
 reserve a large image area when no verified photo exists. A user's own cook photo may appear as a
 clearly labelled personal image; imported recipe imagery must still carry its own source,
 attribution, and usage-right record before it is shown as recipe photography.
+
+## Interaction contracts in the approved revision
+
+- **Recipes:** visible search; All, Favorites, To cook and Cooked views; category/tag/diet/quick
+  filters and sorting in a sheet. Empty, no-results and failed-search states provide recovery.
+- **Add:** Instagram link, recipe text, local video and manual recipe paths use existing services.
+  Missing-key text and link sources can remain drafts; manual entry needs no key.
+- **Imports:** Working disables duplicate primary action. Connection offers Settings and manual
+  editing. Source and partial states explain what is missing. Only review-ready content shows
+  ingredient/step counts. A draft opens its editor directly, rather than through detail.
+- **Review:** title, ingredients and method are primary. Optional metadata follows; recovery
+  tools appear first for empty linked drafts. Save to recipes enforces recipe quality. Save draft
+  accepts unfinished content, waits for persistence and retains fields after failure. Back/Cancel
+  guard unsaved edits. Editor extraction cancels on exit; background import completion waits
+  instead of replacing an open editor.
+- **Detail:** compact recipe title, optional cook photo, section jumps, wrapping actions and a
+  sticky cook control. Delete lives in the menu with confirmation. Cooked toggling offers Undo.
+  Incomplete/unreviewed recipes cannot start cooking.
+- **Cooking:** retain step navigation, ingredient checklist, scaling, screen-awake and volume-key
+  controls. One active session restores on return. Deadline-based timing survives suspension and
+  process recreation within the same boot. Timer sound requires cooking mode to remain open;
+  background notifications/alarms and multiple simultaneous sessions are outside this revision.
+- **Completion:** mark cooked without forcing a photo chooser. Add/replace/remove personal cook
+  photos remain explicit recipe actions.
+
+Foreground/container pairs must come from the same existing semantic scheme. Never put a fixed
+light container under a dark-scheme foreground. Colour values in Color.kt and mappings in Theme.kt
+remain unchanged. Token contrast calculations are in the concept evidence; full runtime contrast,
+TalkBack, focus, IME/inset and adaptive-layout checks remain [pending](docs/ux-implementation-verification-2026-10-22.md).

@@ -1,6 +1,8 @@
 package com.instarecipe.app.ui.screens
 
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
@@ -135,6 +137,10 @@ internal fun MainScaffold(
     onStartCooking: (Recipe) -> Unit,
     onAdd: () -> Unit,
     onImportVideo: () -> Unit,
+    onImportLink: (String) -> Unit,
+    onImportText: (String) -> Unit,
+    resumeRecipe: Recipe?,
+    isLibraryLoading: Boolean,
     onRetryInstagramImport: (Recipe) -> Unit,
     retryingInstagramImportIds: Set<Long>,
     searchRecipeIds: (String) -> Flow<Set<Long>>,
@@ -145,47 +151,36 @@ internal fun MainScaffold(
 ) {
     val savedRecipes = remember(recipes) { recipes.filter(Recipe::isCookbookReady) }
     val draftRecipes = remember(recipes) { recipes.filter(Recipe::belongsInImports) }
-    val primaryTabs = remember { listOf(Tab.Home, Tab.Collections, Tab.Saved, Tab.Settings) }
+    val primaryTabs = remember { listOf(Tab.Home, Tab.Inbox, Tab.Settings) }
     val motion = LocalMotionMode.current
     var showAddSheet by rememberSaveable { mutableStateOf(false) }
+    val tabStates = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+    val context = LocalContext.current
+    val hasConnection = remember(selectedTab, recipes) { GeminiRecipeExtractor.getApiKeys(context).isNotEmpty() }
     LaunchedEffect(selectedTab) {
-        if (selectedTab == Tab.Explore) onTabSelected(Tab.Home)
+        if (selectedTab == Tab.Explore || selectedTab == Tab.Collections || selectedTab == Tab.Saved) onTabSelected(Tab.Home)
     }
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(34.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_brand_mark),
-                                    contentDescription = null,
-                                    tint = Color.Unspecified,
-                                    modifier = Modifier.size(25.dp)
-                                )
-                            }
-                        }
-                        Column {
-                            Text("InstaRecipe", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleLarge)
-                            Text(
-                                "SAVED. SORTED. COOKED.",
-                                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.2.sp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                    Column {
+                        Text(selectedTab.label, style = MaterialTheme.typography.headlineSmall)
+                        if (selectedTab == Tab.Home) Text(
+                            "${savedRecipes.size} ${if (savedRecipes.size == 1) "recipe" else "recipes"}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
+                actions = {
+                    if (selectedTab != Tab.Settings) TextButton(onClick = { showAddSheet = true }, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Add recipe")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
             )
         },
         floatingActionButton = {},
@@ -195,20 +190,20 @@ internal fun MainScaffold(
                 tonalElevation = 0.dp
             ) {
                 primaryTabs.forEach { tab ->
-                    val isSelected = selectedTab == tab || (selectedTab == Tab.Inbox && tab == Tab.Home)
+                    val isSelected = selectedTab == tab
                     NavigationBarItem(
                         selected = isSelected,
                         onClick = { onTabSelected(tab) },
                         icon = {
                             Icon(
                                 tab.icon,
-                                contentDescription = tab.label,
+                                contentDescription = null,
                                 tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
                         label = {
                             Text(
-                                tab.label,
+                                if (tab == Tab.Inbox && draftRecipes.any { it.importStage(hasConnection) != ImportStage.Working }) "Imports (${draftRecipes.count { it.importStage(hasConnection) != ImportStage.Working }})" else tab.label,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -292,660 +287,36 @@ internal fun MainScaffold(
                 },
                 label = "tab content",
                 modifier = Modifier.weight(1f)
-            ) { activeTab -> when (activeTab) {
-                Tab.Home, Tab.Explore -> LibraryTabScreen(
-                    recipes = savedRecipes,
-                    draftCount = draftRecipes.size,
-                    selectedFilterId = libraryFilterId,
-                    onFilterSelected = onLibraryFilterSelected,
-                    onOpen = onOpen,
-                    onToggleFavorite = onToggleFavorite,
-                    onToggleCooked = onToggleCooked,
-                    onStartCooking = onStartCooking,
-                    onTagSelected = onTagSelected,
-                    onOpenImports = { onTabSelected(Tab.Inbox) },
-                    onSaveReel = { showAddSheet = true },
-                    onRetryInstagramImport = onRetryInstagramImport,
-                    retryingInstagramImportIds = retryingInstagramImportIds,
-                    searchRecipeIds = searchRecipeIds
-                )
-
-                Tab.Collections -> CollectionsTabScreen(
-                    recipes = savedRecipes,
-                    onOpen = onOpen,
-                    onExploreCategory = { category ->
-                        onLibraryFilterSelected(category)
-                        onTabSelected(Tab.Home)
-                    }
-                )
-
-                Tab.Saved -> SavedTabScreen(
-                    recipes = savedRecipes,
-                    onOpen = onOpen,
-                    onToggleFavorite = onToggleFavorite,
-                    onToggleCooked = onToggleCooked,
-                    onStartCooking = onStartCooking,
-                    onExplore = { onTabSelected(Tab.Home) }
-                )
-
-                Tab.Inbox -> InboxTabScreen(
-                    drafts = draftRecipes,
-                    onOpen = onOpen,
-                    onToggleFavorite = onToggleFavorite,
-                    onToggleCooked = onToggleCooked,
-                    onStartCooking = onStartCooking,
-                    onImportVideo = onImportVideo,
-                    onRetryInstagramImport = onRetryInstagramImport,
-                    retryingInstagramImportIds = retryingInstagramImportIds,
-                    onTagSelected = onTagSelected
-                )
-
-                Tab.Settings -> SettingsScreen(
-                    themeMode = themeMode,
-                    onThemeModeChange = onThemeModeChange,
-                    motionMode = motionMode,
-                    onMotionModeChange = onMotionModeChange
-                )
+            ) { activeTab -> tabStates.SaveableStateProvider(activeTab.name) {
+                when (activeTab) {
+                    Tab.Home, Tab.Explore, Tab.Collections, Tab.Saved -> RecipeLibraryScreen(
+                        recipes = savedRecipes, draftCount = draftRecipes.size,
+                        selectedFilterId = libraryFilterId, onFilterSelected = onLibraryFilterSelected,
+                        onOpen = onOpen, onToggleFavorite = onToggleFavorite, onToggleCooked = onToggleCooked,
+                        onStartCooking = onStartCooking, onTagSelected = onTagSelected,
+                        onOpenImports = { onTabSelected(Tab.Inbox) }, onAdd = { showAddSheet = true },
+                        searchRecipeIds = searchRecipeIds, resumeRecipe = resumeRecipe, isLoading = isLibraryLoading
+                    )
+                    Tab.Inbox -> ImportsScreen(
+                        drafts = draftRecipes, hasConnection = hasConnection,
+                        retryingIds = retryingInstagramImportIds, onOpen = onOpen,
+                        onSettings = { onTabSelected(Tab.Settings) }, onRetry = onRetryInstagramImport,
+                        onAdd = { showAddSheet = true }, isLoading = isLibraryLoading
+                    )
+                    Tab.Settings -> SettingsScreen(themeMode, onThemeModeChange, motionMode, onMotionModeChange)
+                }
             } }
+
         }
     }
 
     if (showAddSheet) {
-        ModalBottomSheet(onDismissRequest = { showAddSheet = false }) {
-            Column(
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text("Add to your shelf", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text(
-                    "Save from Instagram or add a recipe manually. InstaRecipe keeps the source, sorts the details, and gets it ready for the stove.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Button(
-                    onClick = {
-                        showAddSheet = false
-                        onImportVideo()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.PlayCircle, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("Import a cooking video")
-                }
-                OutlinedButton(
-                    onClick = {
-                        showAddSheet = false
-                        onAdd()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("Add it manually")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun HomeTabScreen(
-    recipes: List<Recipe>,
-    draftCount: Int,
-    onOpen: (Recipe) -> Unit,
-    onToggleFavorite: (Recipe) -> Unit,
-    onToggleCooked: (Recipe) -> Unit,
-    onStartCooking: (Recipe) -> Unit,
-    onExplore: () -> Unit,
-    onOpenCollections: () -> Unit,
-    onOpenChapter: (String) -> Unit,
-    onOpenSaved: () -> Unit,
-    onOpenImports: () -> Unit,
-    onAddRecipe: () -> Unit
-) {
-    val shelfChapters = remember(recipes) { editorialShelfChapters(recipes) }
-    val featuredChapter = shelfChapters.firstOrNull()
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 112.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
-    ) {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("YOUR KITCHEN SHELF", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.1.sp), color = MaterialTheme.colorScheme.primary)
-                Text("Saved ideas. Sorted for cooking.", style = MaterialTheme.typography.displaySmall)
-                Text(
-                    "A personal cookbook for the recipes you find, make, and want to return to.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                shape = RoundedCornerShape(AppRadii.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                Column {
-                    Image(
-                        painter = painterResource(R.drawable.editorial_home_feature),
-                        contentDescription = "Editorial cookbook photograph of a shared table",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxWidth().height(236.dp)
-                    )
-                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("READY FOR THE STOVE", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp), color = MaterialTheme.colorScheme.primary)
-                        Text(featuredChapter?.chapter?.title ?: "Start a chapter worth keeping", style = MaterialTheme.typography.headlineMedium)
-                        Text(
-                            featuredChapter?.let { "${it.recipes.size} recipes in this chapter. ${it.chapter.note}" }
-                                ?: "Save a recipe or add one manually to start your shelf.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Button(
-                            onClick = { featuredChapter?.let { onOpenChapter(it.targetCategory) } ?: onAddRecipe() },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(AppRadii.control)
-                        ) {
-                            Text(if (featuredChapter == null) "Save a recipe" else "Open chapter")
-                        }
-                    }
-                }
-            }
-        }
-        if (draftCount > 0) {
-            item {
-                OutlinedButton(
-                    onClick = onOpenImports,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                    shape = RoundedCornerShape(AppRadii.control)
-                ) {
-                    Text("Imports waiting for review: $draftCount")
-                }
-            }
-        }
-        item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Your recipe index", style = MaterialTheme.typography.headlineMedium)
-                TextButton(onClick = onOpenCollections) { Text("All chapters") }
-            }
-        }
-        if (shelfChapters.isEmpty()) {
-            item {
-                CulinaryEmptyState(
-                    title = "Your shelf is waiting",
-                    message = "Save recipes into a named category and the first books will appear here."
-                )
-            }
-        } else {
-            item {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    items(shelfChapters, key = { it.chapter.id }) { shelf ->
-                        Card(
-                            onClick = { onOpenChapter(shelf.targetCategory) },
-                            modifier = Modifier.width(176.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            shape = RoundedCornerShape(AppRadii.surface),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                        ) {
-                            Column {
-                                Image(
-                                    painter = painterResource(shelf.chapter.coverRes),
-                                    contentDescription = "Editorial cover for the ${shelf.chapter.title} chapter",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxWidth().height(220.dp)
-                                )
-                                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text("${shelf.recipes.size} recipes", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                                    Text(shelf.chapter.title, style = MaterialTheme.typography.titleLarge)
-                                    Text(shelf.chapter.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Ready to cook", style = MaterialTheme.typography.headlineMedium)
-                TextButton(onClick = onExplore) { Text("Explore") }
-            }
-        }
-        recipes.take(2).forEach { recipe ->
-            item(key = "home-${recipe.id}", contentType = "home-recipe") {
-                ModernRecipeCard(
-                    recipe = recipe,
-                    onOpen = { onOpen(recipe) },
-                    onToggleFavorite = { onToggleFavorite(recipe) },
-                    onToggleCooked = { onToggleCooked(recipe) },
-                    onStartCooking = { onStartCooking(recipe) }
-                )
-            }
-        }
-        if (recipes.isNotEmpty()) {
-            item {
-                OutlinedButton(
-                    onClick = onOpenSaved,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                    shape = RoundedCornerShape(AppRadii.control)
-                ) { Text("Open your saved index") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CollectionsTabScreen(
-    recipes: List<Recipe>,
-    onOpen: (Recipe) -> Unit,
-    onExploreCategory: (String) -> Unit
-) {
-    val chapters = remember(recipes) {
-        recipes.groupBy { it.displayCategory() }
-            .entries
-            .sortedByDescending { it.value.size }
-    }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 112.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
-    ) {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("COLLECTIONS", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.1.sp), color = MaterialTheme.colorScheme.primary)
-                Text("The cover and chapter", style = MaterialTheme.typography.displaySmall)
-                Text("Each chapter is built from your real recipe categories.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        if (chapters.isEmpty()) {
-            item {
-                CulinaryEmptyState(
-                    title = "No chapters yet",
-                    message = "Save recipes with a category and this shelf will arrange them into useful chapters."
-                )
-            }
-        } else {
-            items(chapters, key = { it.key }, contentType = { "collection" }) { (category, recipesInChapter) ->
-                val chapter = editorialChapterFor(category)
-                Card(
-                    onClick = { onExploreCategory(category) },
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    shape = RoundedCornerShape(AppRadii.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                ) {
-                    Column {
-                        if (chapter != null) {
-                            Image(
-                                painter = painterResource(chapter.coverRes),
-                                contentDescription = "Editorial cover for the $category recipe collection",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxWidth().height(220.dp)
-                            )
-                        } else {
-                            Surface(
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.fillMaxWidth().height(112.dp)
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(18.dp),
-                                    verticalArrangement = Arrangement.Center
-                                ) {
-                                    Text("PERSONAL CHAPTER", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp), color = MaterialTheme.colorScheme.onPrimaryContainer)
-                                    Text("A place waiting for its own story.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                                }
-                            }
-                        }
-                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("${recipesInChapter.size} ${if (recipesInChapter.size == 1) "recipe" else "recipes"}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                            Text(category, style = MaterialTheme.typography.headlineMedium)
-                            chapter?.let {
-                                Text(it.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            recipesInChapter.firstOrNull()?.let { recipe ->
-                                Text(recipe.title, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SavedTabScreen(
-    recipes: List<Recipe>,
-    onOpen: (Recipe) -> Unit,
-    onToggleFavorite: (Recipe) -> Unit,
-    onToggleCooked: (Recipe) -> Unit,
-    onStartCooking: (Recipe) -> Unit,
-    onExplore: () -> Unit
-) {
-    var shelfFilter by rememberSaveable { mutableStateOf("all") }
-    val filtered = remember(recipes, shelfFilter) {
-        when (shelfFilter) {
-            "ready" -> recipes.filterNot { it.cooked }
-            "cooked" -> recipes.filter { it.cooked }
-            "favorites" -> recipes.filter { it.favorite }
-            else -> recipes
-        }
-    }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 112.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            Text("YOUR SHELF", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.1.sp), color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            Text("Saved, cooked, and close at hand.", style = MaterialTheme.typography.displaySmall)
-        }
-        item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("all" to "All", "ready" to "To cook", "cooked" to "Cooked", "favorites" to "Saved").forEach { (id, label) ->
-                    FilterChip(selected = shelfFilter == id, onClick = { shelfFilter = id }, label = { Text(label) })
-                }
-            }
-        }
-        if (filtered.isEmpty()) {
-            item {
-                CulinaryEmptyState(
-                    title = if (recipes.isEmpty()) "Nothing saved yet" else "Nothing in this view",
-                    message = if (recipes.isEmpty()) "Explore recipes or save one from a Reel to begin your personal shelf." else "Choose another shelf filter to see more recipes."
-                )
-            }
-            item {
-                Button(onClick = onExplore, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(AppRadii.control)) { Text("Explore recipes") }
-            }
-        } else {
-            items(filtered, key = { "saved-${it.id}" }, contentType = { "saved-recipe" }) { recipe ->
-                ModernRecipeCard(
-                    recipe = recipe,
-                    onOpen = { onOpen(recipe) },
-                    onToggleFavorite = { onToggleFavorite(recipe) },
-                    onToggleCooked = { onToggleCooked(recipe) },
-                    onStartCooking = { onStartCooking(recipe) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LibraryTabScreen(
-    recipes: List<Recipe>,
-    draftCount: Int,
-    selectedFilterId: String,
-    onFilterSelected: (String) -> Unit,
-    onOpen: (Recipe) -> Unit,
-    onToggleFavorite: (Recipe) -> Unit,
-    onToggleCooked: (Recipe) -> Unit,
-    onStartCooking: (Recipe) -> Unit,
-    onTagSelected: (String) -> Unit,
-    onOpenImports: () -> Unit,
-    onSaveReel: () -> Unit,
-    onRetryInstagramImport: (Recipe) -> Unit,
-    retryingInstagramImportIds: Set<Long>,
-    searchRecipeIds: (String) -> Flow<Set<Long>>
-) {
-    var query by rememberSaveable { mutableStateOf("") }
-    val matchingIds by remember(query) { searchRecipeIds(query) }
-        .collectAsStateWithLifecycle(initialValue = emptySet())
-    val searchedRecipes = remember(query, matchingIds, recipes) {
-        recipes.filterBySearch(query, matchingIds)
-    }
-    val filters = remember(recipes) {
-        val builtIns = listOf(
-            CategoryFilter("all", "All"),
-            CategoryFilter("category:veg", "Veg"),
-            CategoryFilter("category:nonveg", "Non-veg"),
-            CategoryFilter("favorites", "Favorites", FilterIconType.Favorite),
-            CategoryFilter("quick", "Quick (<20m)", FilterIconType.Timer),
-            CategoryFilter("protein", "High Protein"),
-            CategoryFilter("cooked", "Cooked", FilterIconType.Check)
+        AddRecipeSheet(
+            onDismiss = { showAddSheet = false }, onImportLink = onImportLink,
+            onImportText = onImportText, onImportVideo = onImportVideo, onWriteRecipe = onAdd,
+            hasConnection = hasConnection,
+            onSettings = { showAddSheet = false; onTabSelected(Tab.Settings) }
         )
-        val categoryFilters = listOf(
-            CategoryFilter("category:breakfast", "Breakfast"),
-            CategoryFilter("category:lunch", "Lunch"),
-            CategoryFilter("category:dinner", "Dinner"),
-            CategoryFilter("category:snack", "Snack"),
-            CategoryFilter("category:other", "Other")
-        )
-        val builtInKeys = setOf("quick", "high protein", "vegetarian", "non-veg", "nonveg", "breakfast", "lunch", "dinner", "snack", "snacks")
-        val tagFilters = TagNormalizer.normalizeAll(recipes.flatMap { it.tags })
-            .filterNot { TagNormalizer.key(it) in builtInKeys }
-            .sortedBy { it.lowercase() }
-            .map { CategoryFilter("tag:${TagNormalizer.key(it)}", it) }
-        builtIns + categoryFilters + tagFilters
-    }
-
-    val filteredRecipes = remember(selectedFilterId, searchedRecipes) {
-        when (selectedFilterId) {
-            "all" -> searchedRecipes
-            "favorites" -> searchedRecipes.filter { it.favorite }
-            "quick" -> searchedRecipes.filter(::isQuickRecipe)
-            "protein" -> searchedRecipes.filter { recipe ->
-                TagNormalizer.matches(recipe.tags, "High Protein")
-            }
-            "veg", "category:veg", "category:nonveg", "category:breakfast", "category:lunch", "category:dinner", "category:snack", "category:other" ->
-                searchedRecipes.filter { it.matchesHomeCategory(selectedFilterId) }
-            "cooked" -> searchedRecipes.filter { it.cooked }
-            else -> if (selectedFilterId.startsWith("tag:")) {
-                val tagKey = selectedFilterId.removePrefix("tag:")
-                searchedRecipes.filter { recipe -> recipe.tags.any { TagNormalizer.key(it) == tagKey } }
-            } else {
-                searchedRecipes.filter { it.displayCategory().equals(selectedFilterId, ignoreCase = true) }
-            }
-        }
-    }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().imePadding(),
-        contentPadding = PaddingValues(bottom = 112.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            Column(
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        "YOUR RECIPE INDEX",
-                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.1.sp),
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text("Find something for the stove.", style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        if (recipes.isEmpty()) "Save a recipe or add one manually to start your index."
-                        else "${recipes.size} ${if (recipes.size == 1) "recipe" else "recipes"} organized on your kitchen shelf.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Button(
-                        onClick = onSaveReel,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                        shape = RoundedCornerShape(AppRadii.control)
-                    ) {
-                        Icon(Icons.Default.BookmarkAdd, contentDescription = null)
-                        Spacer(Modifier.size(8.dp))
-                        Text("Save a recipe", fontWeight = FontWeight.Bold)
-                    }
-                }
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Search recipes or ingredients") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(AppRadii.surface)
-                )
-                if (draftCount > 0) {
-                    OutlinedButton(
-                        onClick = onOpenImports,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                        shape = RoundedCornerShape(AppRadii.control)
-                    ) {
-                        Icon(Icons.Default.Inbox, contentDescription = null)
-                        Spacer(Modifier.size(8.dp))
-                        Text("Imports waiting for review: $draftCount")
-                    }
-                }
-            }
-        }
-
-        // Horizontal Category Filter Pills
-        item {
-            CategoryFilterRow(
-                filters = filters,
-                selectedFilterId = selectedFilterId,
-                onFilterSelected = onFilterSelected
-            )
-        }
-
-        if (filteredRecipes.isEmpty()) {
-            item {
-                CulinaryEmptyState(
-                    title = if (selectedFilterId == "all") "Your first recipe starts with Share" else "Nothing here yet",
-                    message = if (selectedFilterId == "all") {
-                        "From Instagram, tap Share and choose InstaRecipe. We’ll keep the useful cooking bits here."
-                    } else {
-                        "Try another search or switch back to All."
-                    }
-                )
-            }
-        } else {
-            items(filteredRecipes, key = { it.id }, contentType = { "recipe-card" }) { recipe ->
-                val canRetryFromLink = remember(recipe) { recipe.canExtractFromLinkAgain() }
-                val isRetrying = recipe.id in retryingInstagramImportIds
-                Box(modifier = Modifier.padding(horizontal = 20.dp)) {
-                    ModernRecipeCard(
-                        recipe = recipe,
-                        onOpen = { onOpen(recipe) },
-                        onToggleFavorite = { onToggleFavorite(recipe) },
-                        onToggleCooked = { onToggleCooked(recipe) },
-                        onStartCooking = { onStartCooking(recipe) },
-                        onTagClick = onTagSelected,
-                        footerActionLabel = if (canRetryFromLink) {
-                            if (isRetrying) "Extracting from link…" else "Extract from link again"
-                        } else null,
-                        onFooterAction = if (canRetryFromLink) {
-                            { onRetryInstagramImport(recipe) }
-                        } else null,
-                        footerActionEnabled = !isRetrying
-                    )
-                }
-            }
-        }
-    }
-}
-@Composable
-private fun InboxTabScreen(
-    drafts: List<Recipe>,
-    onOpen: (Recipe) -> Unit,
-    onToggleFavorite: (Recipe) -> Unit,
-    onToggleCooked: (Recipe) -> Unit,
-    onStartCooking: (Recipe) -> Unit,
-    onImportVideo: () -> Unit,
-    onRetryInstagramImport: (Recipe) -> Unit,
-    retryingInstagramImportIds: Set<Long>,
-    onTagSelected: (String) -> Unit
-) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().imePadding(),
-        contentPadding = PaddingValues(start = 20.dp, top = 14.dp, end = 20.dp, bottom = 112.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            Column {
-                Text(
-                    "Your imports",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "New finds land here while they become cookable recipes.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                        shape = MaterialTheme.shapes.extraSmall
-                    ) {
-                        Text(
-                            "A SMALL PREP SHORTCUT",
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.9.sp),
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    Column {
-                        Text("Already have the video?", style = MaterialTheme.typography.titleLarge)
-                        Text(
-                            "Drop it in here. You can review every ingredient before saving.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Button(
-                        onClick = onImportVideo,
-                        shape = RoundedCornerShape(AppRadii.control),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.PlayCircle, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.size(4.dp))
-                        Text("Choose a cooking video", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        if (drafts.isEmpty()) {
-            item {
-                CulinaryEmptyState(
-                    title = "All caught up",
-                    message = "Share a cooking Reel whenever you find one worth making."
-                )
-            }
-        } else {
-            items(drafts, key = { it.id }, contentType = { "recipe-card" }) { draft ->
-                val canRetryFromLink = remember(draft) { draft.canExtractFromLinkAgain() }
-                val isRestarting = draft.id in retryingInstagramImportIds
-                ModernRecipeCard(
-                    recipe = draft,
-                    onOpen = { onOpen(draft) },
-                    onToggleFavorite = { onToggleFavorite(draft) },
-                    onToggleCooked = { onToggleCooked(draft) },
-                    onStartCooking = { onStartCooking(draft) },
-                    onTagClick = onTagSelected,
-                    footerActionLabel = if (canRetryFromLink) {
-                        if (isRestarting) "Starting extraction…" else "Extract from link again"
-                    } else null,
-                    onFooterAction = if (canRetryFromLink) {
-                        { onRetryInstagramImport(draft) }
-                    } else null,
-                    footerActionEnabled = !isRestarting
-                )
-            }
-        }
     }
 }
 
@@ -1050,8 +421,11 @@ private fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Text("Your kitchen", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("Make the journal feel like yours and keep recipe imports running.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("PREFERENCES", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.1.sp), color = MaterialTheme.colorScheme.primary)
+                Text("Make it yours", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text("Appearance, recipe imports and local storage.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
 
         item {
@@ -1207,6 +581,52 @@ private fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey"))
+                                        )
+                                    }
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Get key (AI Studio)")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    val pasted = clipboard?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()?.trim().orEmpty()
+                                    if (pasted.isBlank()) {
+                                        testStatus = "Clipboard is empty. Copy your Gemini Auth key first."
+                                    } else {
+                                        apiKey = pasted
+                                        isTesting = true
+                                        testStatus = null
+                                        coroutineScope.launch {
+                                            val res = GeminiRecipeExtractor.testConnections(pasted, backupApiKey)
+                                            if (res.isSuccess && !GeminiRecipeExtractor.setApiKeys(context, pasted, backupApiKey)) {
+                                                testStatus = "Connection worked, but the keys could not be encrypted on this device."
+                                                isTesting = false
+                                                return@launch
+                                            }
+                                            isTesting = false
+                                            testStatus = res.getOrElse { it.message ?: "Failed" }
+                                        }
+                                    }
+                                },
+                                enabled = !isTesting,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Paste & test")
+                            }
+                        }
                         OutlinedButton(
                             onClick = {
                                 testStatus = if (GeminiRecipeExtractor.setApiKeys(context, apiKey, backupApiKey)) {
@@ -1280,15 +700,6 @@ private fun SettingsScreen(
         }
 
         item {
-            TextButton(
-                onClick = { advancedExpanded = !advancedExpanded },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(if (advancedExpanded) "Hide advanced settings" else "Advanced settings")
-            }
-        }
-
-        item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(AppRadii.surface),
@@ -1329,6 +740,16 @@ private fun SettingsScreen(
         }
 
         item {
+            TextButton(
+                onClick = { advancedExpanded = !advancedExpanded },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (advancedExpanded) "Hide advanced settings" else "Advanced settings")
+            }
+        }
+
+        if (advancedExpanded) {
+        item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(AppRadii.surface),
@@ -1363,8 +784,6 @@ private fun SettingsScreen(
                 }
             }
         }
-
-        if (advancedExpanded) {
         // Storage & Auto-Deletion Policy
         item {
             Card(

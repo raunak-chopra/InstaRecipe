@@ -22,7 +22,7 @@ internal data class RecipeQualityAssessment(
 }
 
 private val placeholderText = Regex(
-    """(?i)^(?:unknown|unknown recipe|untitled|untitled recipe|instagram recipe|instagram recipe draft|n/?a|none|not provided|not available|could not determine|cannot determine|as needed|details unavailable)[.! ]*$"""
+    """(?i)^(?:unknown|unknown recipe|untitled|untitled recipe|instagram recipe|instagram recipe draft|creating recipe|recipe needs review|n/?a|none|not provided|not available|could not determine|cannot determine|as needed|details unavailable)[.!… ]*$"""
 )
 
 internal fun String.isPlaceholderRecipeText(): Boolean = trim().matches(placeholderText)
