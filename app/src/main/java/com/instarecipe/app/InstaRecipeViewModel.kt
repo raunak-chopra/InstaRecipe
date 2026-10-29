@@ -109,6 +109,15 @@ class InstaRecipeViewModel(
 
     suspend fun upsertAndAwait(recipe: Recipe): Recipe = persistRecipe(repository, recipe)
 
+    internal suspend fun approveDraft(expected: Recipe) {
+        check(expected.id !in mutableInstagramRetryPhases.value && expected.canQuickApprove()) {
+            "This draft needs review before approval."
+        }
+        checkNotNull(repository.approveDraftIfUnchanged(expected)) {
+            "This draft changed or was removed. Review its current details before approving."
+        }
+    }
+
     suspend fun findBySourceUrl(sourceUrl: String): Recipe? = repository.findBySourceUrl(sourceUrl)
 
     suspend fun keepLinkDraft(recipe: Recipe): Recipe = repository.createOrGetBySourceUrl(recipe)
@@ -133,6 +142,28 @@ class InstaRecipeViewModel(
                     totalTimeMinutes = extracted.totalTimeMinutes, dietType = extracted.dietType
                 ))
             }
+        }
+    }
+
+    fun importScreenshot(uri: Uri) {
+        if (videoExtractionState.value.progress.isExtracting) return
+        val context = getApplication<Application>()
+        if (GeminiRecipeExtractor.getApiKeys(context).isEmpty()) {
+            videoExtractionController.reportError("Connect your Gemini key in Settings, then choose the screenshot again. Your original stays on your device.")
+            return
+        }
+        videoExtractionController.start("Reading your screenshot…", "Screenshot import failed. Choose it again or paste the recipe text") { onStatus ->
+            val image = RecipeScreenshot.read(context, uri)
+            val extracted = GeminiRecipeExtractor.extractRecipe(context, null, null, "Recipe screenshot", null,
+                onStatus = onStatus, screenshot = image)
+            persistRecipe(repository, Recipe(
+                id = 0, title = extracted.title, sourceUrl = "", creator = extracted.creator, category = extracted.category,
+                tags = extracted.tags, ingredients = extracted.ingredients, steps = extracted.steps,
+                notes = listOf("Imported from a screenshot. Review the quantities and any unclear text.", extracted.notes)
+                    .filter(String::isNotBlank).joinToString("\n\n"),
+                favorite = false, cooked = false, status = RecipeStatus.Draft, savedDate = LocalDate.now().toString(),
+                totalTimeMinutes = extracted.totalTimeMinutes, dietType = extracted.dietType
+            ))
         }
     }
 

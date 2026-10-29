@@ -7,13 +7,14 @@ Cooked.**
 
 > Recipe extraction is assistive. Always review ingredient quantities, timings, allergens, and food-safety instructions before cooking.
 
-## Development status — 22 October 2026
+## Development status — 27 October 2026
 
-The approved UI/UX revision builds with the existing app colours. The owner approved verified checksum repairs; strict dependency verification remains enabled. The debug APK's signature verified, all 94 Gradle unit tests passed, and instrumentation tests compiled and packaged. See [APK/build evidence](docs/build-apk-2026-10-22.md) for the artifact, hash and device-test status, and [work status](docs/work-status.md) for remaining UX acceptance work.
+The latest debug APK builds with the existing colours and strict dependency verification. Its signature verified and all **102 Gradle unit tests passed**. Search now matches loaded recipe content directly; screenshot import and best-effort automatic recipe-comment parsing are implemented. Generated decorative imagery no longer ships; personal cook photos remain supported. See [27 October feature/APK evidence](docs/features-2026-10-27.md) for the dated APK, hash and limitations. The owner will test on a physical device; no emulator checks were run for this revision.
 
 ## What it does
 
-- Accepts shared Instagram Reel links and local video files.
+- Accepts shared Instagram Reel links, local video files and recipe screenshots (Add, Android image Share, or draft recovery).
+- Automatically checks available Reel metadata/page comments for recipe text, prioritizing creator comments and marking community-only details unverified. Instagram may omit or block comments; screenshot/pasted-text recovery remains available.
 - Resolves public Reel media when available, with a caption/manual-video fallback when it is not.
 - Uses Gemini multimodal analysis to extract recipe metadata, ingredients, directions, timings, and notes.
 - Keeps Instagram sources and unfinished recipes in Imports, distinguishing reading, missing connection, missing source details, partial content and ready-to-review states. Explicit Save to recipes requires a title, real ingredients and steps; Save draft and guarded exit keep unfinished work.

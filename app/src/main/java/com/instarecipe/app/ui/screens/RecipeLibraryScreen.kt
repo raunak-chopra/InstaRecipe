@@ -20,8 +20,6 @@ import androidx.compose.ui.unit.dp
 import com.instarecipe.app.*
 import com.instarecipe.app.ui.components.ModernRecipeCard
 import com.instarecipe.app.ui.theme.AppRadii
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.CancellationException
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -37,7 +35,6 @@ internal fun RecipeLibraryScreen(
     onTagSelected: (String) -> Unit,
     onOpenImports: () -> Unit,
     onAdd: () -> Unit,
-    searchRecipeIds: (String) -> Flow<Set<Long>>,
     resumeRecipe: Recipe? = null,
     isLoading: Boolean = false
 ) {
@@ -48,21 +45,6 @@ internal fun RecipeLibraryScreen(
     var quick by rememberSaveable { mutableStateOf(false) }
     var sort by rememberSaveable { mutableStateOf("recent") }
     var showFilters by rememberSaveable { mutableStateOf(false) }
-    var searchFailed by remember { mutableStateOf(false) }
-    var searchAttempt by remember { mutableStateOf(0) }
-    val matchingIds by produceState<Set<Long>?>(initialValue = null, key1 = query, key2 = searchAttempt) {
-        value = null
-        searchFailed = false
-        if (query.isBlank()) value = emptySet()
-        else try {
-            searchRecipeIds(query).collect { value = it }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            searchFailed = true
-            value = emptySet()
-        }
-    }
     val categories = remember(recipes) { recipes.map { it.displayCategory() }.distinct().sortedBy { it.lowercase() } }
     val tags = remember(recipes) {
         recipes.flatMap { it.tags }.mapNotNull(TagNormalizer::normalize).distinctBy(TagNormalizer::key)
@@ -71,8 +53,8 @@ internal fun RecipeLibraryScreen(
     }
     val filterCount = listOf(category.isNotBlank(), tag.isNotBlank(), diet.isNotBlank(), quick).count { it } +
         if (selectedFilterId.startsWith("tag:")) 1 else 0
-    val results = remember(recipes, query, matchingIds, selectedFilterId, category, tag, diet, quick, sort) {
-        val selected = recipes.filterBySearch(query, matchingIds.orEmpty()).filter { recipe ->
+    val results = remember(recipes, query, selectedFilterId, category, tag, diet, quick, sort) {
+        val selected = recipes.filterBySearch(query).filter { recipe ->
             val matchesView = when {
                 selectedFilterId == "favorites" -> recipe.favorite
                 selectedFilterId == "tocook" -> !recipe.cooked
@@ -132,16 +114,7 @@ internal fun RecipeLibraryScreen(
                 OutlinedButton(onClick = onOpenImports, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("$draftCount ${if (draftCount == 1) "import" else "imports"} to finish") }
             }
             when {
-                searchFailed -> item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Search couldn't finish. Your recipes are still kept.", color = MaterialTheme.colorScheme.error)
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            TextButton(onClick = { searchAttempt++ }) { Text("Try search again") }
-                            TextButton(onClick = { query = "" }) { Text("Show all recipes") }
-                        }
-                    }
-                }
-                isLoading || (query.isNotBlank() && matchingIds == null) -> item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                isLoading -> item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
                 results.isEmpty() -> item {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

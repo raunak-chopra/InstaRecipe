@@ -103,6 +103,15 @@ interface RecipeDao {
     @Update
     suspend fun update(recipe: RecipeEntity): Int
 
+    /** Approve exactly the row shown to the user; never overwrite concurrent extraction or edits. */
+    @Transaction
+    suspend fun approveDraftIfUnchanged(expected: RecipeEntity): RecipeEntity? {
+        val current = findById(expected.id) ?: return null
+        if (current != expected || !current.toRecipe().canQuickApprove()) return null
+        val approved = current.toRecipe().quickApproved().toEntity()
+        return if (update(approved) == 1) approved else null
+    }
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(recipes: List<RecipeEntity>)
 
@@ -281,6 +290,8 @@ abstract class InstaRecipeDatabase : RoomDatabase() {
 }
 
 interface RecipeStore {
+    /** Stores without atomic promotion support safely decline rather than overwrite a draft. */
+    suspend fun approveDraftIfUnchanged(expected: Recipe): Recipe? = null
     val recipes: Flow<List<Recipe>>
     /** Ids of recipes matching every term of [query] as a word prefix; empty for a blank query. */
     fun searchIds(query: String): Flow<Set<Long>>
@@ -299,6 +310,8 @@ interface RecipeStore {
 }
 
 class RecipeRepository private constructor(private val dao: RecipeDao) : RecipeStore {
+    override suspend fun approveDraftIfUnchanged(expected: Recipe): Recipe? =
+        dao.approveDraftIfUnchanged(expected.toEntity())?.toRecipe()
     override val recipes: Flow<List<Recipe>> = dao.observeAll().map { entities -> entities.map(RecipeEntity::toRecipe) }
 
     override fun searchIds(query: String): Flow<Set<Long>> {

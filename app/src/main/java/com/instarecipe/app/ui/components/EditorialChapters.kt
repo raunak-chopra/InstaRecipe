@@ -1,8 +1,7 @@
 package com.instarecipe.app.ui.components
 
-import androidx.annotation.DrawableRes
-import com.instarecipe.app.R
 import com.instarecipe.app.Recipe
+
 
 /**
  * The small, deliberately curated shelf used by Home and Collections. A category must map to a
@@ -13,7 +12,6 @@ data class EditorialChapter(
     val id: String,
     val title: String,
     val note: String,
-    @param:DrawableRes val coverRes: Int,
     val categoryMatchers: Set<String>
 )
 
@@ -22,49 +20,42 @@ private val editorialChapters = listOf(
         id = "dinner",
         title = "Dinner",
         note = "The table after a long day.",
-        coverRes = R.drawable.editorial_dinner_weeknight,
         categoryMatchers = setOf("dinner", "weeknight", "main", "mains")
     ),
     EditorialChapter(
         id = "quick",
         title = "Quick recipes",
         note = "Good food, soon.",
-        coverRes = R.drawable.editorial_quick_recipes,
         categoryMatchers = setOf("quick", "quick recipes", "lunch")
     ),
     EditorialChapter(
         id = "sauces",
         title = "Sauces & condiments",
         note = "Small jars, big returns.",
-        coverRes = R.drawable.editorial_sauces_condiments,
         categoryMatchers = setOf("sauces & condiments", "sauces", "condiments")
     ),
     EditorialChapter(
         id = "fresh",
         title = "Fresh & green",
         note = "A little brightness on the shelf.",
-        coverRes = R.drawable.editorial_fresh_green,
         categoryMatchers = setOf("fresh & green", "vegetarian", "salads", "vegetables")
     ),
     EditorialChapter(
         id = "sweet",
         title = "Sweet things",
         note = "For the last page of dinner.",
-        coverRes = R.drawable.editorial_sweet_things,
         categoryMatchers = setOf("sweet things", "dessert", "desserts", "baking")
     ),
     EditorialChapter(
         id = "charred",
         title = "Charred & smoky",
         note = "Fire, depth, and a little edge.",
-        coverRes = R.drawable.editorial_charred_smoky,
         categoryMatchers = setOf("charred & smoky", "grill", "smoky")
     ),
     EditorialChapter(
         id = "summer",
         title = "Summer table",
         note = "The bright, easy chapter.",
-        coverRes = R.drawable.editorial_summer_table,
         categoryMatchers = setOf("summer table", "summer", "seasonal")
     )
 )

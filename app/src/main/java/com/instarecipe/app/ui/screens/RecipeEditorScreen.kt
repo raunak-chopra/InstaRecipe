@@ -275,6 +275,27 @@ internal fun RecipeEditor(
         }
     }
 
+    val editorScreenshotPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null && !isExtractingFromEditor && !isSaving) coroutineScope.launch {
+            isExtractingFromEditor = true
+            editorFeedbackIsError = false
+            editorFeedbackMessage = "Reading the recipe screenshot…"
+            try {
+                val image = RecipeScreenshot.read(context, uri)
+                val extracted = GeminiRecipeExtractor.extractRecipe(context, null, null,
+                    sourceUrl.ifBlank { "Recipe screenshot" }, creator.ifBlank { null }, screenshot = image)
+                applyExtractedRecipe(extracted)
+                editorFeedbackIsError = false
+                editorFeedbackMessage = "Screenshot read. Review quantities and any unclear text before saving."
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                editorFeedbackIsError = true
+                editorFeedbackMessage = error.message ?: "Couldn't read that screenshot. Your existing details are kept."
+            } finally { isExtractingFromEditor = false }
+        }
+    }
+
     if (showPasteCaptionDialog) {
         AlertDialog(
             onDismissRequest = { showPasteCaptionDialog = false },
@@ -356,10 +377,15 @@ internal fun RecipeEditor(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Complete the source details", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                         Text(
-                            "Add a video or paste the caption if the draft needs more recipe detail.",
+                            "Add a screenshot of the recipe comments, a video, or pasted text if the draft needs more detail.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        OutlinedButton(
+                            onClick = { editorScreenshotPicker.launch("image/*") },
+                            enabled = !isExtractingFromEditor && !isSaving,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                        ) { Text("Read recipe screenshot") }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
