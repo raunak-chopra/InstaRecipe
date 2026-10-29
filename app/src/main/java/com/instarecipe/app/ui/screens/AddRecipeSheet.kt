@@ -17,6 +17,7 @@ internal fun AddRecipeSheet(
     onImportLink: (String) -> Unit,
     onImportText: (String) -> Unit,
     onImportVideo: () -> Unit,
+    onImportScreenshot: () -> Unit,
     onWriteRecipe: () -> Unit,
     hasConnection: Boolean,
     onSettings: () -> Unit
@@ -59,9 +60,13 @@ internal fun AddRecipeSheet(
                 TextButton(onClick = onSettings) { Text("Connection settings") }
             }
             HorizontalDivider()
+            OutlinedButton(onClick = { onImportScreenshot(); onDismiss() }, enabled = hasConnection,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Import recipe screenshot") }
+            Text("Screenshots can include recipe comments. Only legible text is used; review missing or unclear details before saving.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedButton(onClick = { onImportVideo(); onDismiss() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Choose a cooking video") }
             OutlinedButton(onClick = { onWriteRecipe(); onDismiss() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Write a recipe manually") }
-            Text("Manual recipes work without a connection. AI imports send your chosen text or video to Google Gemini.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Manual recipes work without a connection. AI imports send your chosen text, screenshot or video to Google Gemini. Available recipe comments are checked automatically during Reel import.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

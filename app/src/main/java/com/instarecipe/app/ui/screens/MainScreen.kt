@@ -137,13 +137,14 @@ internal fun MainScaffold(
     onStartCooking: (Recipe) -> Unit,
     onAdd: () -> Unit,
     onImportVideo: () -> Unit,
+    onImportScreenshot: () -> Unit,
     onImportLink: (String) -> Unit,
     onImportText: (String) -> Unit,
     resumeRecipe: Recipe?,
     isLibraryLoading: Boolean,
     onRetryInstagramImport: (Recipe) -> Unit,
+    onApproveDraft: suspend (Recipe) -> Unit,
     retryingInstagramImportIds: Set<Long>,
-    searchRecipeIds: (String) -> Flow<Set<Long>>,
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
     motionMode: MotionMode,
@@ -295,12 +296,12 @@ internal fun MainScaffold(
                         onOpen = onOpen, onToggleFavorite = onToggleFavorite, onToggleCooked = onToggleCooked,
                         onStartCooking = onStartCooking, onTagSelected = onTagSelected,
                         onOpenImports = { onTabSelected(Tab.Inbox) }, onAdd = { showAddSheet = true },
-                        searchRecipeIds = searchRecipeIds, resumeRecipe = resumeRecipe, isLoading = isLibraryLoading
+                        resumeRecipe = resumeRecipe, isLoading = isLibraryLoading
                     )
                     Tab.Inbox -> ImportsScreen(
                         drafts = draftRecipes, hasConnection = hasConnection,
                         retryingIds = retryingInstagramImportIds, onOpen = onOpen,
-                        onSettings = { onTabSelected(Tab.Settings) }, onRetry = onRetryInstagramImport,
+                        onSettings = { onTabSelected(Tab.Settings) }, onRetry = onRetryInstagramImport, onApprove = onApproveDraft,
                         onAdd = { showAddSheet = true }, isLoading = isLibraryLoading
                     )
                     Tab.Settings -> SettingsScreen(themeMode, onThemeModeChange, motionMode, onMotionModeChange)
@@ -313,7 +314,7 @@ internal fun MainScaffold(
     if (showAddSheet) {
         AddRecipeSheet(
             onDismiss = { showAddSheet = false }, onImportLink = onImportLink,
-            onImportText = onImportText, onImportVideo = onImportVideo, onWriteRecipe = onAdd,
+            onImportText = onImportText, onImportVideo = onImportVideo, onImportScreenshot = onImportScreenshot, onWriteRecipe = onAdd,
             hasConnection = hasConnection,
             onSettings = { showAddSheet = false; onTabSelected(Tab.Settings) }
         )

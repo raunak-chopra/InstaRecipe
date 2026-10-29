@@ -1,5 +1,7 @@
 # Visual asset provenance
 
+> **27 October 2026:** The owner requested removing generated/decorative imagery. The nine packaged food images were moved unchanged into `docs/retired-decorative-assets-2026-10-27/`; they no longer ship as app resources. Personal cook photos remain supported. The records below describe the retired assets' original provenance, not current product use.
+
 ## Kitchen Journal food photography
 
 Generated on 2026-09-16 with the built-in image generator for this project. The resulting PNGs
@@ -18,7 +20,7 @@ usage-right record before being presented as recipe imagery.
 ## Editorial shelf asset pack
 
 Supplied by the project owner on 2026-09-16 from
-`C:\Users\rauna\Desktop\Bots\Image generation\exports\editorial-food-assets.zip`. The archive
+`[local asset archive]`. The archive
 README records RGB PNG source images without typography, logo, watermark, UI, or collage. The app
 ships the selected images as quality-90 JPEGs in `drawable-nodpi` to keep the APK practical.
 

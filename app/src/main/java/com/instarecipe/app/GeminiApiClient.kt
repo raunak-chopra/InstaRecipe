@@ -46,8 +46,12 @@ internal data class GeminiContentDto(
 @Serializable
 internal data class GeminiPartDto(
     val text: String? = null,
-    val fileData: GeminiFileDataDto? = null
+    val fileData: GeminiFileDataDto? = null,
+    val inlineData: GeminiInlineDataDto? = null
 )
+
+@Serializable
+internal data class GeminiInlineDataDto(val mimeType: String, val data: String)
 
 @Serializable
 internal data class GeminiFileDataDto(
@@ -172,8 +176,13 @@ internal class GeminiApiClient(
         prompt: String,
         videoFile: File?,
         onStatus: (String) -> Unit = {},
-        maxGenerationAttempts: Int = DEFAULT_GENERATION_ATTEMPTS
+        maxGenerationAttempts: Int = DEFAULT_GENERATION_ATTEMPTS,
+        screenshot: GeminiInlineDataDto? = null
     ): String {
+        require(videoFile == null || screenshot == null) { "Choose one screenshot or one video at a time." }
+        screenshot?.let {
+            require(it.mimeType in setOf("image/jpeg", "image/png", "image/webp") && it.data.isNotBlank() && it.data.length <= 12 * 1024 * 1024) { "Invalid screenshot input." }
+        }
         var uploadedFile: UploadedFile? = null
         try {
             val parts = buildList {
@@ -184,6 +193,10 @@ internal class GeminiApiClient(
                     uploadedFile = uploaded
                     add(GeminiPartDto(fileData = GeminiFileDataDto("video/mp4", uploaded.uri)))
                     onStatus("Reading the video, audio, and on-screen instructions…")
+                }
+                screenshot?.let {
+                    onStatus("Reading the recipe text in your screenshot…")
+                    add(GeminiPartDto(inlineData = it))
                 }
                 add(GeminiPartDto(text = prompt))
             }

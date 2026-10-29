@@ -19,12 +19,15 @@ internal fun ImportCard(
     onReview: () -> Unit,
     onSettings: () -> Unit,
     onRetry: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onApprove: (() -> Unit)? = null,
+    isApproving: Boolean = false
 ) {
     val stage = recipe.importStage(hasConnection, isRetrying)
+    val showApproval = onApprove != null && recipe.canQuickApprove() && !isRetrying
     Card(
         modifier = modifier.fillMaxWidth().semantics {
-            stateDescription = stage.label
+            stateDescription = if (isApproving) "Approving recipe" else stage.label
             liveRegion = LiveRegionMode.Polite
         },
         shape = RoundedCornerShape(AppRadii.card),
@@ -33,19 +36,24 @@ internal fun ImportCard(
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stage.label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-            if (stage == ImportStage.Working) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (stage == ImportStage.Working || isApproving) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             Text(recipe.displayTitle(), style = MaterialTheme.typography.titleLarge)
             Text(recipe.importDescription(stage), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Button(
-                onClick = if (stage == ImportStage.Connection) onSettings else onReview,
-                enabled = stage != ImportStage.Working,
+                onClick = {
+                    if (showApproval) onApprove?.invoke() else if (stage == ImportStage.Connection) onSettings() else onReview()
+                },
+                enabled = stage != ImportStage.Working && !isApproving,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-            ) { Text(stage.action) }
+            ) { Text(if (isApproving) "Approving…" else if (showApproval) "Approve recipe" else stage.action) }
+            if (showApproval) {
+                TextButton(onClick = onReview, enabled = !isApproving, modifier = Modifier.heightIn(min = 48.dp)) { Text("Review / edit") }
+            }
             if (stage == ImportStage.Connection) {
                 TextButton(onClick = onReview, modifier = Modifier.heightIn(min = 48.dp)) { Text("Edit draft manually") }
             }
             if (stage != ImportStage.Working && stage != ImportStage.Connection && recipe.canExtractFromLinkAgain()) {
-                TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text("Try link again") }
+                TextButton(onClick = onRetry, enabled = !isApproving, modifier = Modifier.heightIn(min = 48.dp)) { Text("Try link again") }
             }
         }
     }

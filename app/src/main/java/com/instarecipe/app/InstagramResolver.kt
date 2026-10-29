@@ -32,7 +32,8 @@ data class VideoResolutionResult(
 private data class InstagramPageInfo(
     val caption: String?,
     val creator: String?,
-    val videoUrl: String?
+    val videoUrl: String?,
+    val recipeComments: String? = null
 )
 
 @Serializable
@@ -146,6 +147,8 @@ object InstagramResolver {
         // A shared caption already contains the useful recipe signal. Avoid the slowest and most
         // failure-prone path (Reel download + Files API upload) unless the caption is insufficient.
         if (shouldPreferCaptionOnly(caption)) {
+            onStatusUpdate("Checking available recipe comments…")
+            caption = InstagramRecipeComments.combine(caption, availablePageComments(cleanUrl))
             return@withContext VideoResolutionResult(
                 videoFile = null,
                 caption = caption,
@@ -160,7 +163,10 @@ object InstagramResolver {
         if (!sessionCookies.isNullOrBlank() && !shortcode.isNullOrBlank()) {
             onStatusUpdate("Fetching Reel through your Instagram session...")
             resolveAuthenticatedMedia(context, cleanUrl, shortcode, sessionCookies, onStatusUpdate)?.let { authResult ->
-                return@withContext authResult.copy(caption = caption ?: authResult.caption)
+                onStatusUpdate("Checking available recipe comments…")
+                val sourceText = InstagramRecipeComments.combine(caption, authResult.caption)
+                val comments = if (InstagramRecipeComments.includesComments(sourceText)) null else availablePageComments(cleanUrl)
+                return@withContext authResult.copy(caption = InstagramRecipeComments.combine(sourceText, comments))
             }
         }
 
@@ -172,6 +178,8 @@ object InstagramResolver {
                 if (resolvedVideoUrl != null) {
                     onStatusUpdate("Downloading the resolved video...")
                     downloadVideoToCache(context, resolvedVideoUrl)?.let { video ->
+                        onStatusUpdate("Checking available recipe comments…")
+                        caption = InstagramRecipeComments.combine(caption, availablePageComments(cleanUrl))
                         return@withContext VideoResolutionResult(video, caption, null, resolvedVideoUrl, cleanUrl)
                     }
                 }
@@ -185,7 +193,9 @@ object InstagramResolver {
         onStatusUpdate("Checking the public post caption...")
         try {
             fetchInstagramPageInfo(cleanUrl).let { pageInfo ->
-                if (caption.isNullOrBlank()) caption = pageInfo.caption
+                caption = InstagramRecipeComments.combine(caption ?: pageInfo.caption, pageInfo.recipeComments)
+                onStatusUpdate(if (pageInfo.recipeComments != null) "Recipe comments found. Reading the cooking details…"
+                    else "Instagram did not expose recipe comments. Checking the caption and video…")
                 creator = profileName(preferredProfileUrl) ?: pageInfo.creator
                 if (shouldPreferCaptionOnly(caption)) {
                     return@withContext VideoResolutionResult(
@@ -235,7 +245,10 @@ object InstagramResolver {
                 if (!response.isSuccessful || response.body.contentLength() > MAX_METADATA_BYTES) return@use null
                 val item = JSONObject(response.body.readTextLimited(MAX_METADATA_BYTES))
                     .optJSONArray("items")?.optJSONObject(0) ?: return@use null
-                val caption = item.optJSONObject("caption")?.optString("text")?.takeIf(String::isNotBlank)
+                val caption = InstagramRecipeComments.combine(
+                    item.optJSONObject("caption")?.optString("text")?.takeIf(String::isNotBlank),
+                    InstagramRecipeComments.fromMediaJson(item.toString())
+                )
                 val creator = item.optJSONObject("user")?.optString("username")?.takeIf(String::isNotBlank)
                 val videoUrl = item.optJSONArray("video_versions")?.optJSONObject(0)?.optString("url")
                     ?.takeIf(String::isNotBlank)
@@ -339,6 +352,11 @@ object InstagramResolver {
         return null
     }
 
+    private suspend fun availablePageComments(url: String): String? = try {
+        fetchInstagramPageInfo(url).recipeComments
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) { null }
+
     private suspend fun fetchInstagramPageInfo(instagramUrl: String): InstagramPageInfo {
         var currentUrl = instagramUrl.toHttpUrlOrNull() ?: return InstagramPageInfo(null, null, null)
         repeat(MAX_PAGE_REDIRECTS + 1) { redirectCount ->
@@ -360,6 +378,7 @@ object InstagramResolver {
                 InstagramPageInfo(
                     caption = extractMetaContent(html, "og:description") ?: extractMetaContent(html, "description"),
                     creator = extractMetaContent(html, "og:title"),
+                    recipeComments = InstagramRecipeComments.fromHtml(html, extractShortcode(instagramUrl)),
                     videoUrl = extractMetaContent(html, "og:video:secure_url")
                         ?: extractMetaContent(html, "og:video")
                 )

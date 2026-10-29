@@ -48,6 +48,20 @@ class RecipeSearchTest {
         assertFalse(isQuickRecipe(pasta.copy(notes = "Cook time: 35 minutes")))
     }
 
+    @Test fun `search finds loaded recipes even when index returns no hits`() {
+        assertEquals(listOf(pasta), listOf(pasta).filterBySearch("tomato", emptySet()))
+        assertEquals(listOf(pasta), listOf(pasta).filterBySearch("MINA garlic"))
+        assertEquals(listOf(pasta), listOf(pasta).filterBySearch("Vegetarian roast"))
+        assertTrue(listOf(pasta).filterBySearch("missing ingredient").isEmpty())
+    }
+
+    @Test fun `search tolerates accents punctuation and partial words`() {
+        val recipe = pasta.copy(title = "Crème tomato soup", ingredients = listOf("पनीर"))
+        assertEquals(listOf(recipe), listOf(recipe).filterBySearch("CREME, toma"))
+        assertEquals(listOf(recipe), listOf(recipe).filterBySearch("पनीर"))
+        assertTrue(listOf(recipe).filterBySearch("***").isEmpty())
+    }
+
     @Test fun `quick recipe prefers structured total time over notes`() {
         assertFalse(isQuickRecipe(pasta.copy(totalTimeMinutes = 45)))
         assertTrue(isQuickRecipe(pasta.copy(notes = "Cook time: 35 minutes", totalTimeMinutes = 15)))

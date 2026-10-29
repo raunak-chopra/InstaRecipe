@@ -3,6 +3,8 @@
 **State:** Approved layout revision built as a debug APK; unit tests passed; full device/accessibility inspection and independent review pending
 **Updated:** 2026-10-22
 
+**27 October update:** Search reads actual loaded recipe content. Add/Share and draft recovery accept recipe screenshots through the existing Gemini connection. Reel import checks available recipe comments automatically, preserving attribution and uncertainty. Generated decorative assets were retired from app resources; personal cook photos remain. See [current implementation evidence](docs/features-2026-10-27.md). Palette values and fonts are unchanged.
+
 ## Product idea
 
 InstaRecipe is a personal cookbook made from recipes people find in their social feed. The
@@ -19,7 +21,7 @@ the single searchable saved library; Imports owns sources and unfinished work. L
 identities remain only to restore older activity state and redirect to Recipes. InstaRecipe remains
 a personal local-first app using the owner's Gemini key. No palette, font, dependency or Room
 schema change belongs to this revision. The selected design uses A's recipe-first hierarchy and
-C's compact row treatment from the [approved concepts](docs/ux-redesign-2026-10-22/CONCEPT-REVISION.md).
+C's compact row treatment from the approved concepts (local evidence retained outside this checkpoint).
 
 ## Visual direction
 

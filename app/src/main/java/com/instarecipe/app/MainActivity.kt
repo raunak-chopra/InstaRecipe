@@ -85,6 +85,7 @@ import java.time.LocalDate
 sealed interface SharePayload {
     data class Text(val content: String) : SharePayload
     data class Video(val uri: Uri) : SharePayload
+    data class Screenshot(val uri: Uri) : SharePayload
 }
 
 
@@ -176,6 +177,12 @@ private fun Intent.extractSharePayload(): SharePayload? {
         if (videoUri?.scheme == ContentResolver.SCHEME_CONTENT) {
             return SharePayload.Video(videoUri)
         }
+    }
+
+    if (type?.startsWith("image/") == true) {
+        val imageUri: Uri? = if (android.os.Build.VERSION.SDK_INT >= 33) getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            else { @Suppress("DEPRECATION") getParcelableExtra(Intent.EXTRA_STREAM) }
+        if (imageUri?.scheme == ContentResolver.SCHEME_CONTENT) return SharePayload.Screenshot(imageUri)
     }
 
     // Check for text/plain share (Instagram app link share)
@@ -274,6 +281,11 @@ private fun InstaRecipeApp(
     LaunchedEffect(initialSharePayload) {
         when (val incoming = initialSharePayload) {
             is SharePayload.Text -> acceptedSharedText = incoming.content
+            is SharePayload.Screenshot -> {
+                selectedTab = Tab.Inbox
+                viewModel.importScreenshot(incoming.uri)
+                onShareHandled()
+            }
             is SharePayload.Video -> {
                 selectedTab = Tab.Inbox
                 viewModel.importSharedVideo(incoming.uri)
@@ -335,6 +347,10 @@ private fun InstaRecipeApp(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) viewModel.importGalleryVideo(uri)
+    }
+
+    val importScreenshotLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) { selectedTab = Tab.Inbox; viewModel.importScreenshot(uri) }
     }
 
     fun markCooked(recipe: Recipe) {
@@ -633,13 +649,14 @@ private fun InstaRecipeApp(
                         editingRecipeId = 0L
                     },
                     onImportVideo = { importVideoLauncher.launch("video/*") },
+                    onImportScreenshot = { importScreenshotLauncher.launch("image/*") },
                     onImportLink = { acceptedSharedText = it },
                     onImportText = viewModel::importRecipeText,
                     resumeRecipe = recipes.firstOrNull { it.id == resumableCooking?.recipeId && it.isCookbookReady() },
                     isLibraryLoading = isLibraryLoading,
                     onRetryInstagramImport = viewModel::retryInstagramImport,
+                    onApproveDraft = viewModel::approveDraft,
                     retryingInstagramImportIds = retryingInstagramImportIds,
-                    searchRecipeIds = viewModel::searchRecipeIds,
                     themeMode = themeMode,
                     onThemeModeChange = { selectedMode ->
                         themeMode = selectedMode

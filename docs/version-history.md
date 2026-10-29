@@ -1,10 +1,34 @@
 # InstaRecipe behavior history
 
+## 29 October 2026 — isolated source preservation
+
+Preserved the 27–28 October search, screenshot/comment import, quick-approval implementation and tests on a separate feature branch based on e3abb8b. Source behavior is unchanged from the reviewed owner working snapshot. Nine retired decorative assets are byte-identical Git renames to the documentation archive.
+
+Files: reviewed app source/manifest/tests, ASSET_PROVENANCE.md, DESIGN_SYSTEM.md, README.md and portable behavior/status notes. Removed an inherited machine-specific archive path and labelled excluded local design/build evidence links in this isolated copy. Original source/staging, private SDK configuration, local prototypes, screenshots and APKs remain outside this checkpoint.
+
+Reason: preserve current work remotely without interfering with the active checkout or implying acceptance/merge approval. Rollback: revert this checkpoint on a feature branch, restoring resource references/assets together; keep personal data and original work untouched. Device/live API validation remains separate. Fresh maintenance validation is recorded in the preservation PR.
+
+## 28 October 2026 — approve complete drafts directly
+
+Complete drafts now offer **Approve recipe** in Imports, alongside Review / edit. Approval promotes the existing row without opening the editor or changing tabs and announces success after persistence. Incomplete, partial, failed or processing imports cannot bypass review. A transaction declines stale/deleted/already-approved rows, preserving edits and personal fields and avoiding duplicate creation; buttons disable during approval.
+
+Files: RecipePresentation.kt, RecipeDatabase.kt, InstaRecipeViewModel.kt, MainActivity.kt, MainScreen.kt, ImportsScreen.kt and ImportCard.kt; QuickApprovalTest.kt and QuickApprovalPersistenceTest.kt. The browser library proposal also includes direct approval. Wider library/navigation changes remain proposed.
+
+Verification: **105 unit tests passed**, debug APK and instrumentation APK built, app signature verified. Room device tests compiled but were not run; no emulator/device or live API use. Artifact identity, device checklist and scoped rollback are in [quick-approval evidence](quick-approval-2026-10-28.md). No schema, dependency, build/signing configuration, version or colour changes.
+
+## 27 October 2026 — search recovery, screenshots, comments and image removal
+
+The owner reported search failing and requested screenshot import, automatic recipe parsing from Reel comments, and removal of generated/decorative photos while retaining personal photos. Search now matches the loaded library's actual content and no longer waits for or depends on FTS IDs. Screenshot picker/share input uses bounded decoding and the existing Gemini client; an existing draft can also be completed from a screenshot. Comments exposed in authenticated media/public page metadata are automatically considered, scoped to the requested Reel, with creator priority and source/community labels. Unavailable/restricted comments remain a documented limitation with screenshot/text recovery. Nine decorative images were archived outside app resources; personal-photo/data fields are untouched.
+
+Files: RecipeSearch.kt, RecipeLibraryScreen.kt, MainScreen.kt, MainActivity.kt, AndroidManifest.xml, AddRecipeSheet.kt, RecipeEditorScreen.kt, RecipeScreenshot.kt, GeminiApiClient.kt, GeminiRecipeExtractor.kt, InstaRecipeViewModel.kt, InstagramResolver.kt, InstagramRecipeComments.kt, RecipePresentation.kt and legacy EditorialChapters.kt; three unit-test files, retired assets and documentation. No dependencies, build metadata, schema, palette, signing or version changes.
+
+Verification: debug APK built, signature verified; **102 Gradle unit tests passed** with no failures/errors/skips. Decorative assets are absent from the APK and archived originals match their original Git hashes. No emulator, physical-device or live API checks were performed. Artifact/hash, limitations and rollback from baseline `e3abb8b` are in [feature evidence](features-2026-10-27.md). Revert only this change's reviewed hunks/new helper files and restore archived resource references/assets together; preserve personal photos and owner edits, and never reset/clear app data as rollback.
+
 ## 22 October 2026 — checksum repair and debug APK
 
 The owner explicitly authorized fixing the missing checksum and building the APK, superseding the earlier metadata restriction. Three missing existing transitive POM entries were individually checked against fresh Maven Central bytes and published SHA-1 values, then recorded as SHA-256 entries in `gradle/verification-metadata.xml`: Guava parent 33.4.0-jre, coroutines BOM 1.10.2 and Guava parent 33.2.1-jre. No dependencies were added/upgraded; strict verification was retained.
 
-`assembleDebug` succeeded, all **94 Gradle unit tests passed**, instrumentation source compiled and the test APK packaged. The app APK signature verified. Artifact identity, checksum evidence and current device coverage are recorded in [build evidence](build-apk-2026-10-22.md). No source compile fixes, signing/configuration changes, app-data clearing, commits, push or publication were needed for this build.
+`assembleDebug` succeeded, all **94 Gradle unit tests passed**, instrumentation source compiled and the test APK packaged. The app APK signature verified. Artifact identity, checksum evidence and current device coverage are recorded in build evidence (local evidence retained outside this checkpoint). No source compile fixes, signing/configuration changes, app-data clearing, commits, push or publication were needed for this build.
 
 Rollback for the metadata repair is removal of only those three component entries; this restores the previous verification blocker rather than producing a usable build. Do not weaken verification. The source redesign record below describes its earlier implementation stage; its original build blocker is now resolved.
 

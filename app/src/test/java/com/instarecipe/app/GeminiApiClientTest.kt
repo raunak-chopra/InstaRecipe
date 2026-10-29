@@ -23,6 +23,25 @@ class GeminiApiClientTest {
     private lateinit var server: MockWebServer
     private lateinit var client: GeminiApiClient
 
+    @Test fun screenshotUsesInlineImageDataWithoutAVideoUpload() = runTest {
+        server.enqueue(MockResponse().setBody(successResponse("""{"title":"Screenshot soup"}""")))
+        val result = client.generateRecipe("test-key", "Read only legible recipe text", null,
+            screenshot = GeminiInlineDataDto("image/png", "AQID"))
+        assertTrue(result.contains("Screenshot soup"))
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains("\"inlineData\":{\"mimeType\":\"image/png\",\"data\":\"AQID\"}"))
+        assertFalse(body.contains("\"fileData\""))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test fun screenshotRejectsNonImageDataBeforeSendingAnything() {
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { client.generateRecipe("test-key", "Read", null,
+                screenshot = GeminiInlineDataDto("application/pdf", "AQID")) }
+        }
+        assertEquals(0, server.requestCount)
+    }
+
     @Before
     fun setUp() {
         server = MockWebServer()
